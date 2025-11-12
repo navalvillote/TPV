@@ -1,0 +1,16 @@
+# Dependencias de la aplicación TPV
+
+# Interfaz gráfica (incluida en Python estándar)
+# tkinter - viene con Python
+
+# Imágenes
+Pillow>=10.0.0
+
+# Encriptación
+cryptography>=41.0.0
+
+# Impresión en Windows
+pywin32>=306
+
+# Utilidades
+python-dateutil>=2.8.2
