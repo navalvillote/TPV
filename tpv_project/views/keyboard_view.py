@@ -287,6 +287,8 @@ class KeyboardView(BasePanel):
         self.producto_familia.colocar(x, y)
         self.producto_familia.datos = ''
         self.producto_familia.accion = 'familia'
+        # CORRECCIÓN: Familia empieza invertida (activa)
+        self.producto_familia.invertir_colores()
         self.producto_familia.bind("<Button-1>", self._on_click_producto)
         self.producto_familia.bind("<ButtonRelease-1>", self._on_release_producto)
         
@@ -300,7 +302,8 @@ class KeyboardView(BasePanel):
         self.producto_nombre.colocar(x + dis, y)
         self.producto_nombre.datos = ''
         self.producto_nombre.accion = 'nombre'
-        self.producto_nombre.invertir_colores()  # Activo por defecto
+        # CORRECCIÓN: Nombre empieza SIN invertir (inactivo)
+        # NO llamamos a invertir_colores() aquí
         self.producto_nombre.bind("<Button-1>", self._on_click_producto)
         self.producto_nombre.bind("<ButtonRelease-1>", self._on_release_producto)
         
@@ -314,20 +317,21 @@ class KeyboardView(BasePanel):
         self.producto_precio.colocar(x + dis * 2, y)
         self.producto_precio.datos = ''
         self.producto_precio.accion = 'precio'
+        # CORRECCIÓN: Precio empieza SIN invertir (inactivo)
         self.producto_precio.bind("<Button-1>", self._on_click_producto)
         self.producto_precio.bind("<ButtonRelease-1>", self._on_release_producto)
-    
-    def _on_click_producto(self, event) -> None:
-        """Maneja los clics en los controles del modo Producto."""
-        event.widget.invertir_colores()
-    
+
+
     def _on_release_producto(self, event) -> None:
         """Maneja la liberación de clics en modo Producto."""
         accion = event.widget.accion
         
         if accion == 'familia':
+            # Activar solo familia, desactivar otros
+            self._activar_campo_producto('familia')
+            
             # Cambiar familia
-            texto = event.widget.texto
+            texto = self.producto_familia.texto
             if texto == 'Bebida':
                 nuevo = 'Comida'
             elif texto == 'Comida':
@@ -335,8 +339,8 @@ class KeyboardView(BasePanel):
             else:
                 nuevo = 'Bebida'
             
-            event.widget.cambiar_texto(nuevo)
-            event.widget.datos = nuevo
+            self.producto_familia.cambiar_texto(nuevo)
+            self.producto_familia.datos = nuevo
             
             # Recargar lista inmediatamente
             self._cargar_productos_por_familia(nuevo)
@@ -349,22 +353,13 @@ class KeyboardView(BasePanel):
             self.entrada.cambiar_texto('')
             self.gestor_entrada.limpiar()
             
-            # No tocar la inversión de colores de familia
-            # Solo asegurar que nombre está activo por defecto
-            if not self.producto_nombre.invertido:
-                self.producto_nombre.invertir_colores()
-            if self.producto_precio.invertido:
-                self.producto_precio.invertir_colores()
-            
+            # Modo escritura para familia (no se escribe nada)
             self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
             self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_PRODUCTOS)
         
         elif accion == 'nombre':
-            # Activar nombre y desactivar precio
-            if not self.producto_nombre.invertido:
-                self.producto_nombre.invertir_colores()
-            if self.producto_precio.invertido:
-                self.producto_precio.invertir_colores()
+            # Activar solo nombre, desactivar otros
+            self._activar_campo_producto('nombre')
             
             # Establecer modo texto
             self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
@@ -372,13 +367,23 @@ class KeyboardView(BasePanel):
             
             # Cargar el contenido en la entrada
             self._actualizar_entrada_producto()
+            
+            # CORRECCIÓN: Ajustar teclado según el contenido actual
+            texto_actual = self.gestor_entrada.obtener_texto()
+            if len(texto_actual) == 0:
+                # Texto vacío -> Mayúsculas
+                if not self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = True
+            else:
+                # Tiene texto -> Minúsculas
+                if self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = False
         
         elif accion == 'precio':
-            # Activar precio y desactivar nombre
-            if self.producto_nombre.invertido:
-                self.producto_nombre.invertir_colores()
-            if not self.producto_precio.invertido:
-                self.producto_precio.invertir_colores()
+            # Activar solo precio, desactivar otros
+            self._activar_campo_producto('precio')
             
             # Establecer modo numérico
             self.modo_escritura = ModeConfig.ESCRITURA_MONEDAS
@@ -398,7 +403,71 @@ class KeyboardView(BasePanel):
         elif accion == 'limpiar':
             self._limpiar_producto()
             event.widget.invertir_colores()
+
+
+    def _activar_campo_producto(self, campo_activo: str) -> None:
+        """
+        Activa un campo y desactiva los otros (comportamiento de radio button).
+        
+        Args:
+            campo_activo: 'familia', 'nombre' o 'precio'
+        """
+        # Desactivar todos primero
+        if self.producto_familia.invertido:
+            self.producto_familia.invertir_colores()
+        if self.producto_nombre.invertido:
+            self.producto_nombre.invertir_colores()
+        if self.producto_precio.invertido:
+            self.producto_precio.invertir_colores()
+        
+        # Activar solo el campo seleccionado
+        if campo_activo == 'familia':
+            if not self.producto_familia.invertido:
+                self.producto_familia.invertir_colores()
+        elif campo_activo == 'nombre':
+            if not self.producto_nombre.invertido:
+                self.producto_nombre.invertir_colores()
+        elif campo_activo == 'precio':
+            if not self.producto_precio.invertido:
+                self.producto_precio.invertir_colores()
+
+
+    def _limpiar_producto(self) -> None:
+        """Limpia los campos del producto."""
+        # Guardar familia actual antes de limpiar
+        familia_actual = self.producto_familia.datos
+        
+        # No limpiar la familia, solo los otros campos
+        self.producto_nombre.cambiar_texto('')
+        self.producto_nombre.datos = ''
+        
+        self.producto_precio.cambiar_texto('')
+        self.producto_precio.datos = ''
+        
+        self.entrada.cambiar_texto('')
+        self.gestor_entrada.limpiar()
+        
+        # Activar solo familia después de limpiar
+        self._activar_campo_producto('familia')
+        
+        # Establecer modo de escritura para familia
+        self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
+        self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_PRODUCTOS)
+        
+        # CORRECCIÓN: Asegurar que el teclado esté en mayúsculas al limpiar
+        if not self.gestor_entrada.mayusculas:
+            self.teclado.cambiar_mayusculas()
+            self.gestor_entrada.mayusculas = True
+        
+        # Recargar listado de la familia actual
+        if familia_actual:
+            self._cargar_productos_por_familia(familia_actual)
+
     
+    def _on_click_producto(self, event) -> None:
+        """Maneja los clics en los controles del modo Producto."""
+        event.widget.invertir_colores()
+       
     def _actualizar_entrada_producto(self) -> None:
         """Actualiza la entrada según el campo activo."""
         if self.producto_nombre.invertido:
@@ -500,35 +569,6 @@ class KeyboardView(BasePanel):
                 self.info.actualizar_texto(
                     convertir_texto_multilnea('Error al eliminar producto', 54)
                 )
-    
-    def _limpiar_producto(self) -> None:
-        """Limpia los campos del producto."""
-        # Guardar familia actual antes de limpiar
-        familia_actual = self.producto_familia.datos
-        
-        # No limpiar la familia, solo los otros campos
-        self.producto_nombre.cambiar_texto('')
-        self.producto_nombre.datos = ''
-        
-        self.producto_precio.cambiar_texto('')
-        self.producto_precio.datos = ''
-        
-        self.entrada.cambiar_texto('')
-        self.gestor_entrada.limpiar()
-        
-        # Asegurar que nombre está activo y precio no
-        if not self.producto_nombre.invertido:
-            self.producto_nombre.invertir_colores()
-        if self.producto_precio.invertido:
-            self.producto_precio.invertir_colores()
-        
-        # Establecer modo de escritura para texto (nombres de productos)
-        self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
-        self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_PRODUCTOS)
-        
-        # Recargar listado de la familia actual
-        if familia_actual:
-            self._cargar_productos_por_familia(familia_actual)
     
     # ========================================================================
     # MODO PENDIENTE
@@ -928,6 +968,12 @@ class KeyboardView(BasePanel):
         Args:
             tecla: Tecla presionada
         """
+        # CORRECCIÓN: Si estamos en modo producto y familia está activa, no hacer nada
+        if self.modo_actual == ModeConfig.MODO_PRODUCTO:
+            if self.producto_familia.invertido:
+                # Familia está activa, ignorar todas las teclas del teclado virtual
+                return
+        
         if self.modo_escritura == ModeConfig.ESCRITURA_PASSWORD:
             self._procesar_password(tecla)
         elif self.modo_escritura == ModeConfig.ESCRITURA_MONEDAS:
@@ -990,14 +1036,15 @@ class KeyboardView(BasePanel):
         if not (tecla.isalnum() or tecla in [' ', '-', '.', 'Ñ', 'Ü', 'Ç'] or tecla == 'Space' or tecla == 'Delete'):
             return  # Ignorar teclas no válidas
         
+        # CORRECCIÓN: Aplicar lógica de mayúsculas ANTES de procesar la tecla
+        if tecla != 'Delete':
+            if self.modo_escritura == ModeConfig.ESCRITURA_NOMBRES:
+                self._aplicar_modo_nombres_antes(tecla)
+            elif self.modo_escritura == ModeConfig.ESCRITURA_PRODUCTOS:
+                self._aplicar_modo_productos_antes(tecla)
+        
         # Configurar modo de escritura en el gestor
         self.gestor_entrada.establecer_modo(self.modo_escritura)
-        
-        # Aplicar lógica según modo
-        if self.modo_escritura == ModeConfig.ESCRITURA_NOMBRES:
-            self._aplicar_modo_nombres(tecla)
-        elif self.modo_escritura == ModeConfig.ESCRITURA_PRODUCTOS:
-            self._aplicar_modo_productos(tecla)
         
         # Procesar tecla
         texto = self.gestor_entrada.procesar_tecla(tecla)
@@ -1007,39 +1054,124 @@ class KeyboardView(BasePanel):
         
         # Actualizar datos según modo
         self._actualizar_datos_modo()
-    
-    def _aplicar_modo_nombres(self, tecla: str) -> None:
-        """Aplica lógica de nombres propios."""
-        if tecla.isalpha() or tecla == ' ':
-            texto_actual = self.gestor_entrada.obtener_texto()
-            
+        
+        # CORRECCIÓN: Aplicar lógica de mayúsculas DESPUÉS de procesar la tecla
+        # (para ajustar el teclado para la SIGUIENTE tecla)
+        if self.modo_escritura == ModeConfig.ESCRITURA_NOMBRES:
+            self._aplicar_modo_nombres_despues(tecla)
+        elif self.modo_escritura == ModeConfig.ESCRITURA_PRODUCTOS:
+            self._aplicar_modo_productos_despues(tecla)
+
+
+    def _aplicar_modo_nombres_antes(self, tecla: str) -> None:
+        """
+        Aplica lógica de mayúsculas ANTES de procesar la tecla (modo nombres).
+        Determina si la tecla debe escribirse en mayúsculas o minúsculas.
+        
+        Args:
+            tecla: Tecla que se va a procesar
+        """
+        # Solo aplicar a letras
+        if not (tecla.isalpha() or tecla in ['Ñ', 'Ü', 'Ç']):
+            return
+        
+        texto_actual = self.gestor_entrada.obtener_texto()
+        
+        # Si el texto está vacío, debe estar en mayúsculas
+        if len(texto_actual) == 0:
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
+
+
+    def _aplicar_modo_nombres_despues(self, tecla: str) -> None:
+        """
+        Aplica lógica de mayúsculas DESPUÉS de procesar la tecla (modo nombres).
+        Ajusta el teclado para la siguiente tecla.
+        
+        Args:
+            tecla: Tecla que se acaba de procesar
+        """
+        texto_actual = self.gestor_entrada.obtener_texto()
+        
+        # CORRECCIÓN: Si se borró todo con Delete, volver a mayúsculas
+        if tecla == 'Delete':
             if len(texto_actual) == 0:
                 if not self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = True
-            else:
-                if texto_actual[-1] == ' ':
-                    if not self.gestor_entrada.mayusculas:
-                        self.teclado.cambiar_mayusculas()
-                        self.gestor_entrada.mayusculas = True
-                else:
-                    if self.gestor_entrada.mayusculas:
-                        self.teclado.cambiar_mayusculas()
-                        self.gestor_entrada.mayusculas = False
-    
-    def _aplicar_modo_productos(self, tecla: str) -> None:
-        """Aplica lógica de productos (solo primera mayúscula)."""
-        if tecla.isalpha() or tecla == ' ':
-            texto_actual = self.gestor_entrada.obtener_texto()
-            
+            # Si se borró hasta un espacio al final, siguiente letra en mayúsculas
+            elif texto_actual.endswith(' '):
+                if not self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = True
+            return
+        
+        # Solo aplicar a letras y espacios
+        if not (tecla.isalpha() or tecla in ['Ñ', 'Ü', 'Ç'] or tecla == 'Space'):
+            return
+        
+        if tecla == 'Space':
+            # Después de un espacio, la siguiente letra debe ser mayúscula
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
+        else:
+            # Después de una letra, las siguientes deben ser minúsculas
+            # (a menos que el usuario pulse Shift manualmente)
+            if self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = False
+
+
+    def _aplicar_modo_productos_antes(self, tecla: str) -> None:
+        """
+        Aplica lógica de mayúsculas ANTES de procesar la tecla (modo productos).
+        Solo la primera letra en mayúsculas.
+        
+        Args:
+            tecla: Tecla que se va a procesar
+        """
+        # Solo aplicar a letras
+        if not (tecla.isalpha() or tecla in ['Ñ', 'Ü', 'Ç']):
+            return
+        
+        texto_actual = self.gestor_entrada.obtener_texto()
+        
+        # Si el texto está vacío, debe estar en mayúsculas
+        if len(texto_actual) == 0:
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
+
+
+    def _aplicar_modo_productos_despues(self, tecla: str) -> None:
+        """
+        Aplica lógica de mayúsculas DESPUÉS de procesar la tecla (modo productos).
+        Después de la primera letra, todo en minúsculas.
+        
+        Args:
+            tecla: Tecla que se acaba de procesar
+        """
+        texto_actual = self.gestor_entrada.obtener_texto()
+        
+        # CORRECCIÓN: Si se borró todo con Delete, volver a mayúsculas
+        if tecla == 'Delete':
             if len(texto_actual) == 0:
                 if not self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = True
-            else:
-                if self.gestor_entrada.mayusculas:
-                    self.teclado.cambiar_mayusculas()
-                    self.gestor_entrada.mayusculas = False
+            return
+        
+        # Solo aplicar a letras
+        if not (tecla.isalpha() or tecla in ['Ñ', 'Ü', 'Ç']):
+            return
+        
+        # Si hay texto y estamos en mayúsculas, cambiar a minúsculas
+        if len(texto_actual) > 0 and self.gestor_entrada.mayusculas:
+            self.teclado.cambiar_mayusculas()
+            self.gestor_entrada.mayusculas = False
+
     
     def _actualizar_datos_modo(self) -> None:
         """Actualiza los datos según el modo actual."""
@@ -1097,6 +1229,12 @@ class KeyboardView(BasePanel):
                         self.gestor_entrada.establecer_texto(nombre)
                         self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
                         self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_PRODUCTOS)
+                        
+                        # CORRECCIÓN: Ajustar teclado - tiene texto -> minúsculas
+                        if self.gestor_entrada.mayusculas:
+                            self.teclado.cambiar_mayusculas()
+                            self.gestor_entrada.mayusculas = False
+                            
                     else:
                         self.entrada.cambiar_texto(precio)
                         self.gestor_entrada.establecer_texto(precio)
@@ -1114,12 +1252,22 @@ class KeyboardView(BasePanel):
                 self.gestor_entrada.establecer_texto(nombre)
                 self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
                 self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_NOMBRES)
+                
+                # CORRECCIÓN: Tiene texto -> minúsculas
+                if self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = False
             
             elif self.modo_actual == ModeConfig.MODO_CAMARERO:
                 self.entrada.cambiar_texto(seleccion)
                 self.gestor_entrada.establecer_texto(seleccion)
                 self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
                 self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_NOMBRES)
+                
+                # CORRECCIÓN: Tiene texto -> minúsculas
+                if self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = False
     
     def _on_tecla_lista(self, event) -> None:
         """Maneja las teclas en el listado."""
@@ -1162,11 +1310,13 @@ class KeyboardView(BasePanel):
                 self.producto_familia.cambiar_texto('Bebida')
                 self.producto_familia.datos = 'Bebida'
             
-            # Asegurar que nombre está activo
-            if not self.producto_nombre.invertido:
-                self.producto_nombre.invertir_colores()
-            if self.producto_precio.invertido:
-                self.producto_precio.invertir_colores()
+            # Asegurar que solo familia está activa al entrar
+            self._activar_campo_producto('familia')
+            
+            # CORRECCIÓN: Texto vacío -> Teclado en mayúsculas
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
             
         elif modo == ModeConfig.MODO_PENDIENTE:
             self.panel_pendiente.traer_al_frente()
@@ -1177,10 +1327,20 @@ class KeyboardView(BasePanel):
             if not self.pendiente_todos.invertido:
                 self.pendiente_todos.invertir_colores()
             
+            # CORRECCIÓN: Texto vacío -> Teclado en mayúsculas
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
+            
         elif modo == ModeConfig.MODO_CAMARERO:
             self.panel_camarero.traer_al_frente()
             self.panel_modos.traer_al_frente()
             self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
+            
+            # CORRECCIÓN: Texto vacío -> Teclado en mayúsculas
+            if not self.gestor_entrada.mayusculas:
+                self.teclado.cambiar_mayusculas()
+                self.gestor_entrada.mayusculas = True
             
         elif modo == 'Password':
             self.panel_password.traer_al_frente()

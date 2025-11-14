@@ -124,7 +124,7 @@ class MainWindow(Tk):
         self._crear_vistas_adicionales()
         
         # Mostrar panel principal por defecto
-        self.panel_principal.traer_al_frente()
+        # self.panel_principal.traer_al_frente()
     
     def _crear_contenedor_principal(self) -> None:
         """Crea el contenedor principal centrado."""
@@ -152,6 +152,9 @@ class MainWindow(Tk):
         self._crear_panel_numericos()
         self._crear_panel_impresion()
         self._crear_panel_pie()
+        
+        # CORRECCIÓN: Crear panel de camareros AL FINAL
+        # para que quede por encima de todo
         self._crear_panel_camareros()
     
     def _crear_titulo(self) -> None:
@@ -385,16 +388,34 @@ class MainWindow(Tk):
     
     def _crear_panel_camareros(self) -> None:
         """Crea el panel de selección de camareros."""
-        ancho = WindowConfig.MIN_WIDTH - 232
-        alto = WindowConfig.MIN_HEIGHT - 164
+        # CORRECCIÓN: Dimensiones originales del área de productos
+        ancho_original = WindowConfig.MIN_WIDTH - 232
+        alto_original = WindowConfig.MIN_HEIGHT - 164
         
         self.panel_camareros = BasePanel(
             self.panel_principal,
-            ancho,
-            alto,
+            ancho_original,
+            alto_original,
             'black'
         )
         self.panel_camareros.colocar(5, 82)
+        
+        # CORRECCIÓN: Guardar dimensiones y posiciones originales
+        self.panel_camareros_ancho_original = ancho_original
+        self.panel_camareros_alto_original = alto_original
+        self.panel_camareros_x_original = 5
+        self.panel_camareros_y_original = 82
+        
+        # Título (ajustado para el nuevo tamaño)
+        self.titulo_camareros = EtiquetaInfo(
+            self.panel_camareros,
+            'SELECCIONE UN CAMARERO PARA COMENZAR',
+            16,
+            'white',
+            'black',
+            50
+        )
+        self.titulo_camareros.colocar(50, 20)
     
     def _crear_vistas_adicionales(self) -> None:
         """Crea las vistas de calendario y teclado virtual."""
@@ -423,6 +444,64 @@ class MainWindow(Tk):
         self.keyboard_view.vincular_callback_verificar_password(self._verificar_password)
         self.keyboard_view.enviar_al_fondo()
     
+    # ========================================================================
+    # MÉTODOS: Expandir y contraer panel de camareros
+    # ========================================================================
+
+    def _expandir_panel_camareros(self) -> None:
+        """Expande el panel de camareros para cubrir toda la pantalla."""
+        # Cambiar tamaño a pantalla completa
+        self.panel_camareros.config(
+            width=WindowConfig.MIN_WIDTH,
+            height=WindowConfig.MIN_HEIGHT
+        )
+        # Mover a posición (0, 0)
+        self.panel_camareros.place(x=0, y=0)
+        
+        # Reposicionar el título
+        self.titulo_camareros.place(x=WindowConfig.MIN_WIDTH // 2 - 300, y=50)
+
+
+    def _contraer_panel_camareros(self) -> None:
+        """Contrae el panel de camareros a su tamaño y posición original."""
+        # Restaurar tamaño original
+        self.panel_camareros.config(
+            width=self.panel_camareros_ancho_original,
+            height=self.panel_camareros_alto_original
+        )
+        # Restaurar posición original
+        self.panel_camareros.place(
+            x=self.panel_camareros_x_original,
+            y=self.panel_camareros_y_original
+        )
+        
+        # Reposicionar el título
+        self.titulo_camareros.place(x=50, y=20)
+
+    def _crear_camareros_ejemplo(self) -> None:
+        """Crea camareros de ejemplo si la DB está vacía."""
+        camareros_ejemplo = [
+            "Juan",
+            "María",
+            "Carlos",
+            "Ana",
+            "Pedro"
+        ]
+        
+        for nombre in camareros_ejemplo:
+            try:
+                if not self.data_manager.waiters.existe_camarero(nombre):
+                    self.data_manager.waiters.agregar_camarero(nombre)
+            except Exception as e:
+                print(f"Error al crear camarero ejemplo {nombre}: {e}")
+        
+        # Guardar en DB
+        try:
+            self.data_manager.guardar_datos_generales()
+            print("Camareros de ejemplo creados y guardados")
+        except Exception as e:
+            print(f"Error al guardar camareros: {e}")
+
     # ========================================================================
     # CARGA DE DATOS
     # ========================================================================
@@ -485,23 +564,34 @@ class MainWindow(Tk):
         self.panel_productos_bebidas.traer_al_frente()
     
     def cargar_camareros(self) -> None:
-        """Carga los camareros en el panel."""
-        # Limpiar existentes
+        """Carga los camareros en el panel de selección."""
+        # Limpiar marcos existentes
         for marco in self.marcos_camareros:
             marco.destroy()
         self.marcos_camareros.clear()
         
+        # CORRECCIÓN: Obtener camareros desde la base de datos
         camareros = self.data_manager.waiters.obtener_todos()
         
-        x = 5
-        y = 5
+        print(f"DEBUG: Camareros cargados desde DB: {camareros}")  # Para debug
         
-        # Botón de gestión
+        # Posición inicial (ajustada para el tamaño normal)
+        x_inicio = 5
+        y_inicio = 60  # Debajo del título
+        x = x_inicio
+        y = y_inicio
+        ancho_boton = 152
+        alto_boton = 70
+        espaciado_x = 157
+        espaciado_y = 75
+        max_columnas = 5
+        
+        # Botón de gestión (primer botón)
         boton_gestion = MarcoConImagen(
             self.panel_camareros,
             'GESTIONAR\nCAMAREROS',
             'tecla_marco',
-            12,
+            14,
             self.panel_camareros.fondo
         )
         boton_gestion.colocar(x, y)
@@ -511,30 +601,46 @@ class MainWindow(Tk):
         boton_gestion.bind("<ButtonRelease-1>", self._on_camarero_seleccion_release)
         self.marcos_camareros.append(boton_gestion)
         
-        # Camareros
-        x += 157
+        # Avanzar a la siguiente posición
+        x += espaciado_x
+        columna = 1
+        
+        # CORRECCIÓN: Añadir cada camarero de la base de datos
         for camarero in camareros:
-            if x > 780:
-                x = 5
-                y += 75
+            # Control de posición (máximo 5 columnas)
+            if columna >= max_columnas:
+                x = x_inicio
+                y += espaciado_y
+                columna = 0
             
-            texto = convertir_texto_multilnea(camarero).upper()
+            # Formatear texto del camarero
+            texto = convertir_texto_multilnea(camarero, 14).upper()
+            
+            # Crear marco para el camarero
             marco = MarcoConImagen(
                 self.panel_camareros,
                 texto,
                 'tecla_marco',
-                12,
+                14,
                 self.panel_camareros.fondo
             )
             marco.colocar(x, y)
             marco.nombre_camarero = camarero
             marco.es_gestion = False
             
+            # Vincular eventos
             marco.bind("<Button-1>", self._on_camarero_seleccion_press)
             marco.bind("<ButtonRelease-1>", self._on_camarero_seleccion_release)
             
             self.marcos_camareros.append(marco)
-            x += 157
+            
+            # Avanzar posición
+            x += espaciado_x
+            columna += 1
+        
+        print(f"DEBUG: Total marcos camareros creados: {len(self.marcos_camareros)}")
+
+
     
     def actualizar_impagos(self) -> None:
         """Actualiza el panel de tickets impagados."""
@@ -594,10 +700,17 @@ class MainWindow(Tk):
     # ========================================================================
     # EVENTOS DE TECLADO NUMÉRICO
     # ========================================================================
-    
+        
     def _on_tecla_numerica(self, tecla: str) -> None:
         """Procesa las teclas del teclado numérico."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        # Obtener el texto sin el símbolo €
         texto_actual = self.pantalla_numerica.obtener_texto()
+        # Limpiar el símbolo € si existe
+        texto_actual = texto_actual.replace('€', '').strip()
         
         if tecla == 'del':
             nuevo_texto = formatear_numero_moneda('Delete', texto_actual)
@@ -619,7 +732,8 @@ class MainWindow(Tk):
             self.pantalla_numerica.actualizar_texto(nuevo_texto + '€')
         else:
             self.pantalla_numerica.limpiar()
-    
+
+
     def _on_tecla_fisica(self, event) -> None:
         """Procesa las teclas del teclado físico."""
         tecla = event.keysym
@@ -641,15 +755,24 @@ class MainWindow(Tk):
     
     def _on_producto_press(self, event) -> None:
         """Maneja el clic en un producto."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_producto_release(self, event) -> None:
+        """Maneja la liberación de un producto."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
         event.widget.invertir_colores()
         
-        nombre = event.widget.nombre_producto
-        self.receipt_controller.agregar_producto(nombre, self.modo_incremento)
+        producto = event.widget.producto
+        self.receipt_controller.agregar_producto(producto, self.modo_incremento)
         self._actualizar_ticket()
-    
-    def _on_producto_release(self, event) -> None:
-        """Maneja la liberación del clic en producto."""
-        event.widget.invertir_colores()
     
     # ========================================================================
     # EVENTOS DE PAGO
@@ -895,8 +1018,22 @@ class MainWindow(Tk):
             self.camarero_actual = event.widget.nombre_camarero
             self.etiqueta_camarero_actual.actualizar_texto(self.camarero_actual)
             
-            # Volver al panel principal
+            # CORRECCIÓN: Volver al panel principal y mostrar bebidas
+            self.panel_principal.traer_al_frente()
             self.panel_productos_bebidas.traer_al_frente()
+
+    def _verificar_camarero_seleccionado(self) -> bool:
+        """
+        Verifica si hay un camarero seleccionado.
+        
+        Returns:
+            bool: True si hay camarero seleccionado, False en caso contrario
+        """
+        if not self.camarero_actual:
+            # CORRECCIÓN: Mostrar panel de camareros si no hay ninguno seleccionado
+            self.panel_camareros.traer_al_frente()
+            return False
+        return True     
     
     def _on_apagar_press(self, event) -> None:
         """Maneja el clic en botón apagar."""
@@ -912,6 +1049,244 @@ class MainWindow(Tk):
         ):
             import os
             os.system("shutdown /s /t 0")
+
+    # ========================================================================
+    # APLICAR VERIFICACIÓN EN TODOS LOS BOTONES PRINCIPALES
+    # ========================================================================
+
+    def _on_bebidas_press(self, event) -> None:
+        """Maneja el clic en el botón de bebidas."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_bebidas_release(self, event) -> None:
+        """Maneja la liberación del botón de bebidas."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.panel_productos_bebidas.traer_al_frente()
+
+
+    def _on_comidas_press(self, event) -> None:
+        """Maneja el clic en el botón de comidas."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_comidas_release(self, event) -> None:
+        """Maneja la liberación del botón de comidas."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.panel_productos_comidas.traer_al_frente()
+
+
+    def _on_otros_press(self, event) -> None:
+        """Maneja el clic en el botón de otros."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_otros_release(self, event) -> None:
+        """Maneja la liberación del botón de otros."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.panel_productos_otros.traer_al_frente()
+
+
+    def _on_varios_press(self, event) -> None:
+        """Maneja el clic en el botón de varios."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_varios_release(self, event) -> None:
+        """Maneja la liberación del botón de varios."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_mas_press(self, event) -> None:
+        """Maneja el clic en el botón de incremento."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_mas_release(self, event) -> None:
+        """Maneja la liberación del botón de incremento."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.modo_incremento = not self.modo_incremento
+
+
+    def _on_cobrar_press(self, event) -> None:
+        """Maneja el clic en el botón de cobrar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_cobrar_release(self, event) -> None:
+        """Maneja la liberación del botón de cobrar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self._cobrar()
+
+
+    def _on_imprimir_press(self, event) -> None:
+        """Maneja el clic en el botón de imprimir."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_imprimir_release(self, event) -> None:
+        """Maneja la liberación del botón de imprimir."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.printer_controller.imprimir_ticket(
+            self.receipt_controller.receipt,
+            self.camarero_actual
+        )
+
+
+    def _on_limpiar_press(self, event) -> None:
+        """Maneja el clic en el botón de limpiar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_limpiar_release(self, event) -> None:
+        """Maneja la liberación del botón de limpiar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.receipt_controller.limpiar_ticket()
+        self._actualizar_ticket()
+        self.pantalla_numerica.limpiar()
+
+
+    def _on_quitar_press(self, event) -> None:
+        """Maneja el clic en el botón de quitar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_quitar_release(self, event) -> None:
+        """Maneja la liberación del botón de quitar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.receipt_controller.quitar_ultimo()
+        self._actualizar_ticket()
+
+
+    def _on_pendiente_press(self, event) -> None:
+        """Maneja el clic en el botón de pendiente."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_pendiente_release(self, event) -> None:
+        """Maneja la liberación del botón de pendiente."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.keyboard_view.cambiar_modo(ModeConfig.MODO_PENDIENTE)
+        self.keyboard_view.traer_al_frente()
+
+
+    def _on_gestionar_press(self, event) -> None:
+        """Maneja el clic en el botón de gestionar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_gestionar_release(self, event) -> None:
+        """Maneja la liberación del botón de gestionar."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.keyboard_view.cambiar_modo(ModeConfig.MODO_PRODUCTO)
+        self.keyboard_view.traer_al_frente()
+
+
+    def _on_calendario_press(self, event) -> None:
+        """Maneja el clic en el botón de calendario."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+
+
+    def _on_calendario_release(self, event) -> None:
+        """Maneja la liberación del botón de calendario."""
+        # CORRECCIÓN: Verificar camarero antes de continuar
+        if not self._verificar_camarero_seleccionado():
+            return
+        
+        event.widget.invertir_colores()
+        self.calendar_view.traer_al_frente()
     
     # ========================================================================
     # CALLBACKS PARA TECLADO VIRTUAL
@@ -928,9 +1303,14 @@ class MainWindow(Tk):
         elif self.keyboard_view.modo_actual == ModeConfig.MODO_PENDIENTE:
             self.actualizar_impagos()
         
-        # Actualizar camareros si estábamos en modo camarero
+        # CORRECCIÓN: Si estábamos en modo camarero, recargar lista
         elif self.keyboard_view.modo_actual == ModeConfig.MODO_CAMARERO:
             self.cargar_camareros()
+            # Si NO hay camarero seleccionado, expandir y mostrar panel de camareros
+            if not self.camarero_actual:
+                self._expandir_panel_camareros()
+                self.panel_camareros.traer_al_frente()
+                return
         
         self.panel_principal.traer_al_frente()
         self.panel_productos_bebidas.traer_al_frente()
@@ -1176,13 +1556,24 @@ class MainWindow(Tk):
         # Cargar impagos
         self.actualizar_impagos()
         
-        # Cargar camareros
+        # CORRECCIÓN: Verificar que hay camareros en la DB
+        camareros = self.data_manager.waiters.obtener_todos()
+        print(f"DEBUG inicializar_datos: Camareros en DB: {camareros}")
+        
+        # CORRECCIÓN: Cargar camareros en el panel
         self.cargar_camareros()
-    
-    def iniciar(self) -> None:
-        """Inicia el loop principal de la aplicación."""
-        self.protocol("WM_DELETE_WINDOW", self._salir)
-        self.mainloop()
+        
+        # CORRECCIÓN: Establecer que NO hay camarero seleccionado
+        self.camarero_actual = None
+        
+        # CORRECCIÓN: Actualizar etiqueta
+        self.etiqueta_camarero_actual.actualizar_texto('(Seleccione camarero)')
+        
+        # CORRECCIÓN: Expandir panel de camareros para cubrir toda la pantalla
+        self._expandir_panel_camareros()
+        
+        # CORRECCIÓN: Mostrar panel de camareros al inicio (traer al frente)
+        self.panel_camareros.traer_al_frente()
 
 
 # ============================================================================
