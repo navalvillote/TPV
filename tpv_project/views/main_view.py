@@ -409,7 +409,7 @@ class MainWindow(Tk):
         # Título (ajustado para el nuevo tamaño)
         self.titulo_camareros = EtiquetaInfo(
             self.panel_camareros,
-            'SELECCIONE UN CAMARERO PARA COMENZAR',
+            'SELECCIONE UN CAMARERO',
             16,
             'white',
             'black',
@@ -459,7 +459,7 @@ class MainWindow(Tk):
         self.panel_camareros.place(x=0, y=0)
         
         # Reposicionar el título
-        self.titulo_camareros.place(x=WindowConfig.MIN_WIDTH // 2 - 300, y=50)
+        self.titulo_camareros.place(x=WindowConfig.MIN_WIDTH // 2 - 300, y=20)
 
 
     def _contraer_panel_camareros(self) -> None:
@@ -476,31 +476,7 @@ class MainWindow(Tk):
         )
         
         # Reposicionar el título
-        self.titulo_camareros.place(x=50, y=20)
-
-    def _crear_camareros_ejemplo(self) -> None:
-        """Crea camareros de ejemplo si la DB está vacía."""
-        camareros_ejemplo = [
-            "Juan",
-            "María",
-            "Carlos",
-            "Ana",
-            "Pedro"
-        ]
-        
-        for nombre in camareros_ejemplo:
-            try:
-                if not self.data_manager.waiters.existe_camarero(nombre):
-                    self.data_manager.waiters.agregar_camarero(nombre)
-            except Exception as e:
-                print(f"Error al crear camarero ejemplo {nombre}: {e}")
-        
-        # Guardar en DB
-        try:
-            self.data_manager.guardar_datos_generales()
-            print("Camareros de ejemplo creados y guardados")
-        except Exception as e:
-            print(f"Error al guardar camareros: {e}")
+        self.titulo_camareros.place(x=100, y=20)
 
     # ========================================================================
     # CARGA DE DATOS
@@ -1019,6 +995,7 @@ class MainWindow(Tk):
             self.etiqueta_camarero_actual.actualizar_texto(self.camarero_actual)
             
             # CORRECCIÓN: Volver al panel principal y mostrar bebidas
+            self._contraer_panel_camareros()
             self.panel_principal.traer_al_frente()
             self.panel_productos_bebidas.traer_al_frente()
 
