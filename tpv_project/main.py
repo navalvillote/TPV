@@ -189,7 +189,7 @@ def main():
         print()
         
         # Iniciar aplicación
-        ventana.iniciar()
+        ventana.mainloop()
         
         # Al cerrar, guardar datos (ya se hace en el método _salir de MainWindow)
         print()
