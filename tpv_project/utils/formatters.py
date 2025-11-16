@@ -108,7 +108,7 @@ def formatear_linea_ticket(cantidad: int, nombre: str, precio: float) -> str:
     suma = cantidad * float(precio)
     suma_str = f'{suma:.2f}'
     num_puntos = TicketConfig.LINE_WIDTH - (
-        len(str(cantidad)) + len(nombre) + len(suma_str)
+        len(str(cantidad)) + len(nombre) + len(suma_str) + 5
     )
     
     return f'{cantidad} x {nombre}:{"." * num_puntos}{suma_str}€'

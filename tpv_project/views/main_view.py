@@ -56,6 +56,11 @@ class MainWindow(Tk):
         self.camarero_actual = ""
         self.camarero_anterior = ""
         self.modo_incremento = 1  # 1 para añadir, -1 para quitar
+
+        # CORRECCIÓN: Variables para modo reordenar
+        self.modo_reordenar_activo = False
+        self.producto_reordenar_1 = None  # Primer producto seleccionado
+        self.producto_reordenar_2 = None  # Segundo producto seleccionado
         
         # Contenedor principal
         self.contenedor: Optional[BasePanel] = None
@@ -98,6 +103,9 @@ class MainWindow(Tk):
         
         # Vincular evento de teclado físico
         self.bind("<Key>", self._on_tecla_fisica)
+
+        # CORRECCIÓN: Vincular evento de redimensionado
+        self.bind("<Configure>", self._on_ventana_redimensionada)
     
     def establecer_controladores(self, receipt_controller: ReceiptController,
                                  printer_controller: PrinterController,
@@ -315,17 +323,34 @@ class MainWindow(Tk):
             ColorScheme.SECONDARY_BG
         )
         self.panel_impresion.colocar(WindowConfig.MIN_WIDTH - 221, 351)
+
+        # CORRECCIÓN: Guardar posiciones y dimensiones originales del PANEL
+        self.panel_impresion_x_original = WindowConfig.MIN_WIDTH - 221
+        self.panel_impresion_y_original = 351
+        self.panel_impresion_ancho_original = 216
+        self.panel_impresion_alto_original = 412
+        
+        # CORRECCIÓN: Guardar posiciones y dimensiones originales
+        self.ticket_x_original = 0
+        self.ticket_y_original = 0
+        self.ticket_ancho_original = 30
+        self.ticket_alto_original = 22
+        
+        # Dimensiones expandidas
+        self.ticket_ancho_expandido = 60  # Doble del ancho
+        self.ticket_alto_expandido = 45   # Alto expandido
         
         # Ticket display
         self.ticket_display = TicketDisplay(
             self.panel_impresion,
-            30,
-            22,
+            self.ticket_ancho_original,
+            self.ticket_alto_original,
             ColorScheme.SECONDARY_BG
         )
-        self.ticket_display.colocar(0, 0)
-        self.ticket_display.bind("<Button-1>", 
-                                lambda e: self._alternar_extension_ticket())
+        self.ticket_display.colocar(self.ticket_x_original, self.ticket_y_original)
+        
+        # CORRECCIÓN: Vincular clic para expansión personalizada
+        self.ticket_display.bind("<Button-1>", self._on_ticket_click)
         
         # Botones de pago
         self._crear_botones_pago()
@@ -442,8 +467,70 @@ class MainWindow(Tk):
         self.keyboard_view.vincular_callback_eliminar_cliente(self._eliminar_cliente)
         self.keyboard_view.vincular_callback_agregar_cliente(self._agregar_cliente)
         self.keyboard_view.vincular_callback_verificar_password(self._verificar_password)
+
+        # Vincular callbacks de camareros
+        self.keyboard_view.vincular_callback_eliminar_camarero(self._eliminar_camarero)
+        self.keyboard_view.vincular_callback_agregar_camarero(self._agregar_camarero)
+        self.keyboard_view.vincular_callback_obtener_camareros(self._obtener_camareros)
+        self.keyboard_view.vincular_callback_ver_tickets_camarero(self._ver_tickets_camarero)
+
+        # Vincular callbacks de tickets pendientes
+        self.keyboard_view.vincular_callback_cargar_clientes_filtrado(self._cargar_clientes_filtrado_callback)
+        self.keyboard_view.vincular_callback_cargar_ticket_pendiente(self._cargar_ticket_pendiente_callback)
+        self.keyboard_view.vincular_callback_unir_tickets(self._unir_tickets_callback)
+
         self.keyboard_view.enviar_al_fondo()
-    
+
+    # ========================================================================
+    # MÉTODOS: Centrar ventana y redimensionar
+    # ========================================================================
+
+    def _on_ventana_redimensionada(self, event) -> None:
+        """
+        Maneja el evento de redimensionado de la ventana.
+        Centra el contenedor principal.
+        """
+        # Solo procesar eventos de la ventana principal, no de widgets hijos
+        if event.widget != self:
+            return
+        
+        # Obtener dimensiones actuales de la ventana
+        ancho_ventana = event.width
+        alto_ventana = event.height
+        
+        # Si el contenedor existe, centrarlo
+        if self.contenedor:
+            self._centrar_contenedor(ancho_ventana, alto_ventana)
+
+    def _centrar_contenedor(self, ancho_ventana: int, alto_ventana: int) -> None:
+        """
+        Centra el contenedor principal en la ventana.
+        
+        Args:
+            ancho_ventana: Ancho actual de la ventana
+            alto_ventana: Alto actual de la ventana
+        """
+        # Calcular posición centrada
+        x_centrado = (ancho_ventana - WindowConfig.MIN_WIDTH) // 2
+        y_centrado = (alto_ventana - WindowConfig.MIN_HEIGHT) // 2
+        
+        # Asegurar que no quede fuera de la ventana (valores negativos)
+        x_centrado = max(0, x_centrado)
+        y_centrado = max(0, y_centrado)
+        
+        # Reposicionar el contenedor
+        self.contenedor.place(x=x_centrado, y=y_centrado)
+
+    def maximizar_ventana(self) -> None:
+        """Maximiza la ventana manteniendo el contenido centrado."""
+        self.state('zoomed')  # Windows
+        # Para Linux/Mac usar: self.attributes('-zoomed', True)
+
+    def restaurar_ventana(self) -> None:
+        """Restaura el tamaño normal de la ventana."""
+        self.state('normal')
+        self.geometry(f"{WindowConfig.MIN_WIDTH}x{WindowConfig.MIN_HEIGHT}")
+        
     # ========================================================================
     # MÉTODOS: Expandir y contraer panel de camareros
     # ========================================================================
@@ -731,25 +818,38 @@ class MainWindow(Tk):
     
     def _on_producto_press(self, event) -> None:
         """Maneja el clic en un producto."""
-        # CORRECCIÓN: Verificar camarero antes de continuar
+        # Verificar camarero antes de continuar
         if not self._verificar_camarero_seleccionado():
             return
         
+        # CORRECCIÓN: Si estamos en modo reordenar
+        if self.modo_reordenar_activo:
+            self._manejar_seleccion_reordenar(event.widget)
+            return
+        
+        # Modo normal: añadir/quitar producto
         event.widget.invertir_colores()
+        
+        nombre = event.widget.nombre_producto
+        self.receipt_controller.agregar_producto(nombre, self.modo_incremento)
+        self._actualizar_ticket()
+
 
 
     def _on_producto_release(self, event) -> None:
-        """Maneja la liberación de un producto."""
-        # CORRECCIÓN: Verificar camarero antes de continuar
+        """Maneja la liberación del clic en producto."""
+        # Verificar camarero antes de continuar
         if not self._verificar_camarero_seleccionado():
             return
         
+        # CORRECCIÓN: Si estamos en modo reordenar, no hacer nada aquí
+        if self.modo_reordenar_activo:
+            return
+        
+        # Modo normal: restaurar colores
         event.widget.invertir_colores()
         
-        producto = event.widget.producto
-        self.receipt_controller.agregar_producto(producto, self.modo_incremento)
-        self._actualizar_ticket()
-    
+
     # ========================================================================
     # EVENTOS DE PAGO
     # ========================================================================
@@ -760,6 +860,9 @@ class MainWindow(Tk):
     
     def _on_boton_pago_release(self, event) -> None:
         """Maneja la liberación del botón de pago."""
+        # Si estamos en modo reordenar, salir
+        if self.modo_reordenar_activo:
+            self._cambiar_modo_reordenar()
         event.widget.invertir_colores()
         
         tipo = event.widget.tipo_pago
@@ -793,14 +896,75 @@ class MainWindow(Tk):
             self.pantalla_numerica.limpiar()
     
     def _abrir_modo_guardar(self) -> None:
-        """Abre el modo guardar ticket pendiente."""
+        """Abre el modo guardar ticket pendiente o gestión de tickets."""
         if self.receipt_controller.recibo_tiene_productos():
+            # Si HAY productos en el ticket, abrir modo guardar ticket
             self.keyboard_view.cambiar_modo(ModeConfig.MODO_PENDIENTE)
+            self.keyboard_view.establecer_texto_boton_volver('Volver')
             self.keyboard_view.traer_al_frente()
         else:
-            # Modo consultar tickets
-            self.calendar_view.traer_al_frente()
-            self.calendar_view.inicializar()
+            # Si NO hay productos, abrir gestión de tickets pendientes
+            self._abrir_gestion_tickets_pendientes()
+
+    def _abrir_gestion_tickets_pendientes(self) -> None:
+        """Abre la pantalla de gestión de tickets pendientes."""
+        # Cambiar a modo pendiente
+        self.keyboard_view.cambiar_modo(ModeConfig.MODO_PENDIENTE)
+        self.keyboard_view.establecer_texto_boton_volver('Volver')
+        
+        # Cargar clientes con tickets pendientes
+        self._cargar_clientes_con_tickets()
+        
+        # Mostrar vista
+        self.keyboard_view.traer_al_frente()
+
+    def _cargar_clientes_con_tickets(self) -> None:
+        """Carga la lista de clientes con sus tickets pendientes."""
+        # Obtener todos los recibos pendientes
+        recibos_pendientes = self.data_manager.receipts_pending
+        
+        # Agrupar por cliente y contar tickets
+        clientes_dict = {}
+        for recibo in recibos_pendientes:
+            nombre_cliente = recibo.nombre
+            if nombre_cliente not in clientes_dict:
+                clientes_dict[nombre_cliente] = {
+                    'count': 0,
+                    'total': 0.0
+                }
+            clientes_dict[nombre_cliente]['count'] += 1
+            clientes_dict[nombre_cliente]['total'] += recibo.calcular_total()
+        
+        # Crear lista formateada
+        items = []
+        colores = []
+        
+        for nombre_cliente in sorted(clientes_dict.keys()):
+            info = clientes_dict[nombre_cliente]
+            tickets_count = info['count']
+            total = info['total']
+            
+            # Formato: "Nombre Cliente - 3 tickets - 45.50€"
+            item = f"{nombre_cliente} - {tickets_count} ticket{'s' if tickets_count > 1 else ''} - {total:.2f}€"
+            items.append(item)
+            
+            # Color según número de tickets
+            if tickets_count > 3:
+                colores.append('red')  # Muchos tickets
+            elif tickets_count > 1:
+                colores.append('orange')  # Varios tickets
+            else:
+                colores.append('black')  # Un ticket
+        
+        # Cargar en el listado
+        if items:
+            self.keyboard_view.cargar_lista(items, colores)
+            mensaje = f'{len(items)} cliente{"s" if len(items) > 1 else ""} con tickets pendientes'
+        else:
+            self.keyboard_view.cargar_lista(['No hay tickets pendientes'], None)
+            mensaje = 'No hay tickets pendientes de pago'
+        
+        self.keyboard_view.actualizar_info(mensaje)
     
     # ========================================================================
     # EVENTOS DEL PIE
@@ -816,6 +980,11 @@ class MainWindow(Tk):
         
         identificador = event.widget.identificador
         
+        # CORRECCIÓN: Si estamos en modo reordenar y pulsamos otro botón (no "ordenar")
+        # salir automáticamente del modo reordenar
+        if self.modo_reordenar_activo and identificador != 'ordenar':
+            self._cambiar_modo_reordenar()  # Desactivar modo reordenar
+        
         if identificador == 'modificar':
             self._cambiar_modo_modificar()
         elif identificador == 'consumiciones':
@@ -823,6 +992,7 @@ class MainWindow(Tk):
         elif identificador == 'productos':
             self._abrir_gestion_productos()
         elif identificador == 'ordenar':
+            # Llamar a _cambiar_modo_reordenar
             self._cambiar_modo_reordenar()
         elif identificador == 'impagos':
             self._mostrar_impagos()
@@ -875,9 +1045,43 @@ class MainWindow(Tk):
         self.keyboard_view.traer_al_frente()
     
     def _cambiar_modo_reordenar(self) -> None:
-        """Activa el modo reordenar productos."""
-        # TODO: Implementar reordenamiento de productos
-        pass
+        """Activa/desactiva el modo reordenar productos."""
+        if not self.modo_reordenar_activo:
+            # ACTIVAR modo reordenar
+            self.modo_reordenar_activo = True
+            self.marcos_pie[3].cambiar_texto('SALIR DE\nREORDENAR')
+
+            # CORRECCIÓN: Mostrar panel de productos (bebidas por defecto)
+            self.panel_productos_bebidas.traer_al_frente()
+            
+            # Cambiar color de fondo de productos a color especial
+            self._cambiar_color_productos(ColorScheme.REORDER)
+            
+            # Invertir colores de todos los productos
+            for marco in self.marcos_productos:
+                if not marco.invertido:
+                    marco.invertir_colores()
+            
+            # Limpiar selecciones previas
+            self.producto_reordenar_1 = None
+            self.producto_reordenar_2 = None
+            
+        else:
+            # DESACTIVAR modo reordenar
+            self.modo_reordenar_activo = False
+            self.marcos_pie[3].cambiar_texto('REORDENAR\nPRODUCTOS')
+            
+            # Restaurar colores originales
+            self._restaurar_color_productos()
+            
+            # Restaurar estado de inversión
+            for marco in self.marcos_productos:
+                if marco.invertido:
+                    marco.invertir_colores()
+            
+            # Limpiar selecciones
+            self.producto_reordenar_1 = None
+            self.producto_reordenar_2 = None
     
     def _mostrar_impagos(self) -> None:
         """Muestra el panel de tickets impagados."""
@@ -967,6 +1171,9 @@ class MainWindow(Tk):
     
     def _on_boton_camarero_release(self, event) -> None:
         """Maneja la liberación del botón camarero."""
+        # Si estamos en modo reordenar, salir
+        if self.modo_reordenar_activo:
+            self._cambiar_modo_reordenar()
         event.widget.invertir_colores()
         self.cargar_camareros()
         self.panel_camareros.traer_al_frente()
@@ -1268,30 +1475,29 @@ class MainWindow(Tk):
     # ========================================================================
     # CALLBACKS PARA TECLADO VIRTUAL
     # ========================================================================
-    
+
+     
     def _volver_desde_teclado(self) -> None:
         """Vuelve desde el teclado virtual al panel principal."""
         # Actualizar productos si estábamos en modo producto
+
         if self.keyboard_view.modo_actual == ModeConfig.MODO_PRODUCTO:
             productos = self.data_manager.products.obtener_todos()
             self.cargar_productos(productos)
+            print("DEBUG: Productos recargados al volver del teclado virtual")
         
         # Actualizar impagos si estábamos en modo pendiente
         elif self.keyboard_view.modo_actual == ModeConfig.MODO_PENDIENTE:
             self.actualizar_impagos()
-        
-        # CORRECCIÓN: Si estábamos en modo camarero, recargar lista
+            print("DEBUG: Impagos recargados al volver del teclado virtual")
+        # Si estábamos en modo camarero, recargar lista de camareros
         elif self.keyboard_view.modo_actual == ModeConfig.MODO_CAMARERO:
             self.cargar_camareros()
-            # Si NO hay camarero seleccionado, expandir y mostrar panel de camareros
-            if not self.camarero_actual:
-                self._expandir_panel_camareros()
-                self.panel_camareros.traer_al_frente()
-                return
+            print("DEBUG: Camareros recargados al volver del teclado virtual")
         
         self.panel_principal.traer_al_frente()
-        self.panel_productos_bebidas.traer_al_frente()
     
+
     def _guardar_producto(self, nombre: str, precio: float, familia: str) -> bool:
         """
         Callback para guardar un producto.
@@ -1449,6 +1655,242 @@ class MainWindow(Tk):
         return self.data_manager.printers
     
     # ========================================================================
+    # CALLBACKS PARA CAMAREROS
+    # ========================================================================
+
+    def _eliminar_camarero(self, nombre_camarero: str) -> tuple:
+        """
+        Callback para eliminar un camarero.
+        
+        Args:
+            nombre_camarero: Nombre del camarero a eliminar
+        
+        Returns:
+            tuple: (bool, str) - (éxito, mensaje)
+        """
+        try:
+            # Verificar si existe
+            if not self.data_manager.waiters.existe_camarero(nombre_camarero):
+                return False, f"{nombre_camarero} no existe en el sistema"
+            
+            # Eliminar camarero
+            exito = self.data_manager.waiters.eliminar_camarero(nombre_camarero)
+            
+            if exito:
+                # Guardar cambios
+                self.data_manager.guardar_datos_generales()
+                
+                # Recargar lista en panel principal
+                self.cargar_camareros()
+                
+                return True, f"{nombre_camarero} ha sido eliminado"
+            else:
+                return False, f"Error al eliminar {nombre_camarero}"
+                
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+
+    def _agregar_camarero(self, nombre_camarero: str) -> tuple:
+        """
+        Callback para agregar un camarero.
+        
+        Args:
+            nombre_camarero: Nombre del camarero a agregar
+        
+        Returns:
+            tuple: (bool, str) - (éxito, mensaje)
+        """
+        try:
+            # Validar nombre
+            if not nombre_camarero or len(nombre_camarero.strip()) == 0:
+                return False, "Debe ingresar un nombre válido"
+            
+            # Verificar si ya existe
+            if self.data_manager.waiters.existe_camarero(nombre_camarero):
+                return False, f"{nombre_camarero} ya existe en el sistema"
+            
+            # Agregar camarero
+            self.data_manager.waiters.agregar_camarero(nombre_camarero)
+            
+            # Guardar cambios
+            self.data_manager.guardar_datos_generales()
+            
+            # Recargar lista en panel principal
+            self.cargar_camareros()
+            
+            return True, f"{nombre_camarero} ha sido agregado"
+            
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+
+    def _obtener_camareros(self) -> List[str]:
+        """
+        Callback para obtener la lista de camareros.
+        
+        Returns:
+            List[str]: Lista de nombres de camareros
+        """
+        try:
+            return self.data_manager.waiters.obtener_todos()
+        except Exception as e:
+            print(f"Error al obtener camareros: {e}")
+            return []
+
+
+    def _ver_tickets_camarero(self, nombre_camarero: str) -> None:
+        """
+        Callback para ver los tickets de un camarero.
+        
+        Args:
+            nombre_camarero: Nombre del camarero
+        """
+        try:
+            # Ir a la vista de calendario con filtro de camarero
+            self.calendar_view.establecer_filtro_camarero(nombre_camarero)
+            self.calendar_view.traer_al_frente()
+            self.calendar_view.inicializar()
+            
+        except Exception as e:
+            print(f"Error al ver tickets del camarero: {e}")
+
+    # ========================================================================
+    # CALLBACKS TICKETS PENDIENTES
+    # ========================================================================
+
+    def _cargar_clientes_filtrado_callback(self, filtro: str) -> None:
+        """
+        Callback para cargar clientes según filtro.
+        
+        Args:
+            filtro: 'todos', 'pendientes' o 'pagados'
+        """
+        if filtro == 'todos':
+            # Todos los clientes (con y sin tickets)
+            todos_clientes = self.data_manager.customers.obtener_todos()
+            recibos_pendientes = self.data_manager.receipts_pending
+            
+            # Agrupar tickets por cliente
+            tickets_por_cliente = {}
+            for recibo in recibos_pendientes:
+                nombre = recibo.nombre
+                if nombre not in tickets_por_cliente:
+                    tickets_por_cliente[nombre] = []
+                tickets_por_cliente[nombre].append(recibo)
+            
+            # Crear lista
+            items = []
+            colores = []
+            
+            for cliente in sorted(todos_clientes):
+                if cliente in tickets_por_cliente:
+                    tickets = tickets_por_cliente[cliente]
+                    count = len(tickets)
+                    total = sum(r.calcular_total() for r in tickets)
+                    item = f"{cliente} - {count} ticket{'s' if count > 1 else ''} - {total:.2f}€"
+                    color = 'red' if count > 3 else 'orange' if count > 1 else 'black'
+                else:
+                    item = f"{cliente} - Sin tickets"
+                    color = 'green'
+                
+                items.append(item)
+                colores.append(color)
+            
+            self.keyboard_view.cargar_lista(items, colores)
+            self.keyboard_view.actualizar_info(f'{len(items)} clientes totales')
+        
+        elif filtro == 'pendientes':
+            # Solo clientes con tickets pendientes
+            self._cargar_clientes_con_tickets()
+        
+        elif filtro == 'pagados':
+            # Clientes sin tickets pendientes
+            todos_clientes = self.data_manager.customers.obtener_todos()
+            clientes_con_tickets = set(r.nombre for r in self.data_manager.receipts_pending)
+            
+            clientes_sin_tickets = [c for c in todos_clientes if c not in clientes_con_tickets]
+            
+            items = [f"{cliente} - Sin deudas" for cliente in sorted(clientes_sin_tickets)]
+            colores = ['green'] * len(items)
+            
+            self.keyboard_view.cargar_lista(items, colores)
+            self.keyboard_view.actualizar_info(f'{len(items)} clientes sin deudas')
+
+    def _cargar_ticket_pendiente_callback(self, nombre_cliente: str) -> None:
+        """
+        Callback para cargar un ticket pendiente.
+        
+        Args:
+            nombre_cliente: Nombre del cliente
+        """
+        # Obtener recibos del cliente
+        recibos_cliente = self.data_manager.obtener_recibos_pendientes_cliente(nombre_cliente)
+        
+        if not recibos_cliente:
+            self.keyboard_view.actualizar_info(f'{nombre_cliente} no tiene tickets pendientes')
+            return
+        
+        # Si hay varios tickets, preguntar cuál cargar o unirlos
+        if len(recibos_cliente) > 1:
+            mensaje = f'{nombre_cliente} tiene {len(recibos_cliente)} tickets. Use "Unir Tickets" o seleccione uno específico'
+            self.keyboard_view.actualizar_info(mensaje)
+            return
+        
+        # Cargar el único ticket
+        recibo = recibos_cliente[0]
+        self.receipt_controller.establecer_recibo_actual(recibo)
+        
+        # Eliminar de pendientes (se volverá a guardar si no se paga)
+        self.data_manager.eliminar_recibo_pendiente(recibo.fecha)
+        self.data_manager.guardar_datos_generales()
+        
+        # Actualizar ticket en pantalla
+        self._actualizar_ticket()
+        
+        # Volver al panel principal
+        self.keyboard_view.enviar_al_fondo()
+        self.panel_principal.traer_al_frente()
+        self.panel_productos_bebidas.traer_al_frente()
+        
+        self.keyboard_view.actualizar_info(f'Ticket de {nombre_cliente} cargado')
+
+    def _unir_tickets_callback(self, nombre_cliente: str) -> tuple:
+        """
+        Callback para unir todos los tickets de un cliente.
+        
+        Args:
+            nombre_cliente: Nombre del cliente
+        
+        Returns:
+            tuple: (bool, str) - (éxito, mensaje)
+        """
+        # Obtener recibos del cliente
+        recibos_cliente = self.data_manager.obtener_recibos_pendientes_cliente(nombre_cliente)
+        
+        if not recibos_cliente:
+            return False, f'{nombre_cliente} no tiene tickets pendientes'
+        
+        if len(recibos_cliente) == 1:
+            return False, f'{nombre_cliente} solo tiene 1 ticket, no hay nada que unir'
+        
+        # Unir tickets
+        recibo_unido = self.data_manager.unir_recibos_pendientes(nombre_cliente)
+        
+        if recibo_unido:
+            # Guardar cambios
+            self.data_manager.guardar_datos_generales()
+            
+            # Actualizar lista de impagos si está visible
+            if self.panel_impagos.winfo_ismapped():
+                self.actualizar_impagos()
+            
+            total = recibo_unido.calcular_total()
+            return True, f'{len(recibos_cliente)} tickets unidos. Total: {total:.2f}€'
+        
+        return False, 'Error al unir tickets'
+        
+    # ========================================================================
     # MÉTODOS AUXILIARES
     # ========================================================================
     
@@ -1456,21 +1898,99 @@ class MainWindow(Tk):
         """Actualiza la visualización del ticket."""
         texto = self.receipt_controller.generar_texto_ticket()
         self.ticket_display.actualizar_texto(texto)
-    
-    def _alternar_extension_ticket(self) -> None:
-        """Alterna la extensión del ticket."""
-        if not self.ticket_display.esta_bloqueado():
-            self.ticket_display.alternar_extension()
-            
-            # Reposicionar botones de pago
-            if self.ticket_display.esta_extendido():
-                y = WindowConfig.MIN_HEIGHT - 76
-            else:
-                y = 342
-            
-            for i, boton in enumerate(self.botones_pago):
-                x = i * 70 + 4
-                boton.colocar(x, y)
+
+    def _on_ticket_click(self, event) -> None:
+        """Maneja el clic en el ticket para expandir/contraer."""
+        if self.ticket_display.esta_extendido():
+            self._contraer_ticket()
+        else:
+            self._expandir_ticket()
+
+    def _expandir_ticket(self) -> None:
+        """Expande el ticket hacia la izquierda, arriba y abajo."""
+        # Bloquear para evitar cambios durante expansión
+        self.ticket_display.bloquear()
+        
+        # CORRECCIÓN: Calcular dimensiones expandidas
+        ancho_expandido = self.panel_impresion_ancho_original * 2  # 432 (doble de 216)
+        alto_expandido = self.panel_impresion_alto_original * 2    # 824 (doble de 412)
+        
+        # CORRECCIÓN: Calcular nueva posición X (mover hacia la izquierda)
+        nuevo_x = self.panel_impresion_x_original - self.panel_impresion_ancho_original
+        
+        # CORRECCIÓN: Calcular nueva posición Y (mover hacia arriba)
+        nuevo_y = self.panel_impresion_y_original - self.panel_impresion_alto_original
+        
+        # CORRECCIÓN: Ajustar para no salir de la pantalla por arriba
+        if nuevo_y < 0:
+            nuevo_y = 0
+            alto_expandido = self.panel_impresion_y_original + self.panel_impresion_alto_original
+        
+        # Expandir el panel_impresion
+        self.panel_impresion.config(width=ancho_expandido, height=alto_expandido)
+        self.panel_impresion.place(x=nuevo_x, y=nuevo_y)
+        
+        # CORRECCIÓN: Traer el panel de impresión AL FRENTE por encima de todo
+        self.panel_impresion.lift()
+        self.panel_impresion.tkraise()
+        
+        # Expandir el ticket_display para llenar el panel
+        self.ticket_display.config(
+            width=self.ticket_ancho_expandido,
+            height=self.ticket_alto_expandido
+        )
+        self.ticket_display.place(x=0, y=0)
+        
+        # CORRECCIÓN: Traer el ticket al frente también
+        self.ticket_display.lift()
+        
+        # Marcar como extendido
+        self.ticket_display.extendido = True
+        
+        # Reposicionar botones de pago en la parte inferior del panel expandido
+        y_botones = alto_expandido - 76
+        for i, boton in enumerate(self.botones_pago):
+            x = i * 70 + 4
+            boton.place(x=x, y=y_botones)
+            # CORRECCIÓN: Asegurar que los botones estén al frente también
+            boton.lift()
+        
+        # Ocultar teclado numérico y pantalla
+        self.panel_numericos.enviar_al_fondo()
+
+
+    def _contraer_ticket(self) -> None:
+        """Contrae el ticket a su tamaño y posición original."""
+        # Restaurar dimensiones originales del panel_impresion
+        self.panel_impresion.config(width=216, height=412)
+        self.panel_impresion.place(x=WindowConfig.MIN_WIDTH - 221, y=351)
+        
+        # Restaurar dimensiones del ticket_display
+        self.ticket_display.config(
+            width=self.ticket_ancho_original,
+            height=self.ticket_alto_original
+        )
+        self.ticket_display.place(x=self.ticket_x_original, y=self.ticket_y_original)
+        
+        # Marcar como contraído
+        self.ticket_display.extendido = False
+        
+        # Desbloquear
+        self.ticket_display.desbloquear()
+        
+        # Restaurar posición de botones de pago
+        y_botones = 342
+        for i, boton in enumerate(self.botones_pago):
+            x = i * 70 + 4
+            boton.place(x=x, y=y_botones)
+        
+        # CORRECCIÓN: Restaurar orden de capas (z-order) original
+        # Enviar panel de impresión a su capa normal
+        self.panel_impresion.lower(self.panel_titulo)
+        
+        # Mostrar teclado numérico y pantalla
+        self.panel_numericos.traer_al_frente()
+        self.panel_numericos.lift()
     
     def _cambiar_color_productos(self, color: str) -> None:
         """Cambia el color de fondo de todos los productos."""
@@ -1499,6 +2019,133 @@ class MainWindow(Tk):
         self.panel_productos_bebidas.cambiar_fondo(ColorScheme.BEBIDAS)
         self.panel_productos_comidas.cambiar_fondo(ColorScheme.COMIDAS)
         self.panel_productos_otros.cambiar_fondo(ColorScheme.OTROS)
+
+    def _manejar_seleccion_reordenar(self, marco_producto) -> None:
+        """
+        Maneja la selección de productos en modo reordenar.
+        
+        Args:
+            marco_producto: Marco del producto seleccionado
+        """
+        # Si no hay primer producto seleccionado
+        if self.producto_reordenar_1 is None:
+            # Seleccionar como primer producto
+            self.producto_reordenar_1 = marco_producto
+            # CORRECCIÓN: DESACTIVAR (invertir para que se vea desactivado)
+            if marco_producto.invertido:
+                marco_producto.invertir_colores()
+            return
+        
+        # Si se hace clic en el mismo producto (deseleccionar)
+        if self.producto_reordenar_1 == marco_producto:
+            # Deseleccionar (volver a activar)
+            if not marco_producto.invertido:
+                marco_producto.invertir_colores()
+            self.producto_reordenar_1 = None
+            return
+        
+        # Si ya hay un primer producto, este es el segundo
+        self.producto_reordenar_2 = marco_producto
+        
+        # CORRECCIÓN: DESACTIVAR el segundo producto antes de intercambiar
+        if marco_producto.invertido:
+            marco_producto.invertir_colores()
+        
+        # Intercambiar posiciones
+        self._intercambiar_productos()
+
+    def _intercambiar_productos(self) -> None:
+        """Intercambia las posiciones de dos productos seleccionados."""
+        if not self.producto_reordenar_1 or not self.producto_reordenar_2:
+            return
+        
+        # Obtener nombres de los productos
+        nombre1 = self.producto_reordenar_1.nombre_producto
+        nombre2 = self.producto_reordenar_2.nombre_producto
+        
+        # Obtener productos completos desde el gestor
+        producto1 = self.data_manager.products.obtener_producto(nombre1)
+        producto2 = self.data_manager.products.obtener_producto(nombre2)
+        
+        if not producto1 or not producto2:
+            print(f"Error: No se encontraron los productos {nombre1} o {nombre2}")
+            return
+        
+        # Verificar que sean de la misma familia
+        if producto1.familia != producto2.familia:
+            print(f"Error: Los productos deben ser de la misma familia")
+            # CORRECCIÓN: Reactivar el primer producto (estaba desactivado)
+            if not self.producto_reordenar_1.invertido:
+                self.producto_reordenar_1.invertir_colores()
+            # El segundo producto ya está desactivado, reactivarlo también
+            if not self.producto_reordenar_2.invertido:
+                self.producto_reordenar_2.invertir_colores()
+            self.producto_reordenar_1 = None
+            self.producto_reordenar_2 = None
+            return
+        
+        # Obtener posiciones actuales
+        pos1 = self.producto_reordenar_1.place_info()
+        pos2 = self.producto_reordenar_2.place_info()
+        
+        # Intercambiar posiciones visuales
+        self.producto_reordenar_1.place(x=pos2['x'], y=pos2['y'])
+        self.producto_reordenar_2.place(x=pos1['x'], y=pos1['y'])
+        
+        # Intercambiar en la lista de marcos
+        idx1 = self.marcos_productos.index(self.producto_reordenar_1)
+        idx2 = self.marcos_productos.index(self.producto_reordenar_2)
+        self.marcos_productos[idx1], self.marcos_productos[idx2] = \
+            self.marcos_productos[idx2], self.marcos_productos[idx1]
+        
+        # Intercambiar en la base de datos
+        self._intercambiar_productos_db(nombre1, nombre2)
+        
+        # CORRECCIÓN: REACTIVAR ambos productos (estaban desactivados)
+        if not self.producto_reordenar_1.invertido:
+            self.producto_reordenar_1.invertir_colores()
+        if not self.producto_reordenar_2.invertido:
+            self.producto_reordenar_2.invertir_colores()
+        
+        # Limpiar selecciones
+        self.producto_reordenar_1 = None
+        self.producto_reordenar_2 = None
+
+    def _intercambiar_productos_db(self, nombre1: str, nombre2: str) -> None:
+        """
+        Intercambia el orden de dos productos en la base de datos.
+        
+        Args:
+            nombre1: Nombre del primer producto
+            nombre2: Nombre del segundo producto
+        """
+        # Obtener todos los productos
+        todos_productos = self.data_manager.products.obtener_todos()
+        
+        # Encontrar índices
+        idx1 = None
+        idx2 = None
+        
+        for i, prod in enumerate(todos_productos):
+            if prod.nombre == nombre1:
+                idx1 = i
+            elif prod.nombre == nombre2:
+                idx2 = i
+        
+        if idx1 is not None and idx2 is not None:
+            # Intercambiar en la lista
+            todos_productos[idx1], todos_productos[idx2] = \
+                todos_productos[idx2], todos_productos[idx1]
+            
+            # Limpiar y recargar productos en el gestor
+            self.data_manager.products.limpiar()
+            for producto in todos_productos:
+                self.data_manager.products.agregar_producto(producto)
+            
+            # Guardar en disco
+            self.data_manager.guardar_datos_generales()
+            
+            print(f"Productos intercambiados: {nombre1} ↔ {nombre2}")     
     
     def _salir(self) -> None:
         """Sale de la aplicación."""

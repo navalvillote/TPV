@@ -601,31 +601,33 @@ class KeyboardView(BasePanel):
         self.pendiente_boton_principal.bind("<Button-1>", self._on_click_pendiente)
         self.pendiente_boton_principal.bind("<ButtonRelease-1>", self._on_release_pendiente)
         
-        boton_eliminar = MarcoConImagen(
+        # CORRECCIÓN: Botón para cargar ticket
+        boton_cargar = MarcoConImagen(
             self.panel_pendiente,
-            'Eliminar',
+            'Cargar',
             'tecla_marco',
             20,
             ColorScheme.PRIMARY_BG
         )
-        boton_eliminar.colocar(x + dis, y)
-        boton_eliminar.accion = 'eliminar'
-        boton_eliminar.bind("<Button-1>", self._on_click_pendiente)
-        boton_eliminar.bind("<ButtonRelease-1>", self._on_release_pendiente)
+        boton_cargar.colocar(x + dis, y)
+        boton_cargar.accion = 'cargar'
+        boton_cargar.bind("<Button-1>", self._on_click_pendiente)
+        boton_cargar.bind("<ButtonRelease-1>", self._on_release_pendiente)
         
-        boton_agregar = MarcoConImagen(
+        # CORRECCIÓN: Botón para unir tickets
+        boton_unir = MarcoConImagen(
             self.panel_pendiente,
-            'Agregar',
+            'Unir',
             'tecla_marco',
             20,
             ColorScheme.PRIMARY_BG
         )
-        boton_agregar.colocar(x + dis * 2, y)
-        boton_agregar.accion = 'agregar'
-        boton_agregar.bind("<Button-1>", self._on_click_pendiente)
-        boton_agregar.bind("<ButtonRelease-1>", self._on_release_pendiente)
+        boton_unir.colocar(x + dis * 2, y)
+        boton_unir.accion = 'unir'
+        boton_unir.bind("<Button-1>", self._on_click_pendiente)
+        boton_unir.bind("<ButtonRelease-1>", self._on_release_pendiente)
         
-        # Filtros
+        # Filtros (se mantienen abajo)
         y = 125
         
         self.pendiente_todos = MarcoConImagen(
@@ -692,18 +694,57 @@ class KeyboardView(BasePanel):
             self._guardar_pendiente()
             event.widget.invertir_colores()
         
-        elif accion == 'eliminar':
-            self._eliminar_cliente()
+        elif accion == 'cargar':
+            self._cargar_ticket_pendiente()
             event.widget.invertir_colores()
         
-        elif accion == 'agregar':
-            self._agregar_cliente()
+        elif accion == 'unir':
+            self._unir_tickets_cliente()
             event.widget.invertir_colores()
     
     def _cargar_clientes_filtrado(self, filtro: str) -> None:
-        """Carga clientes según el filtro."""
-        # Este método debe ser implementado con los callbacks apropiados
-        pass
+        """Carga clientes según el filtro seleccionado."""
+        if self.callback_cargar_clientes_filtrado:
+            self.callback_cargar_clientes_filtrado(filtro)
+
+    def _cargar_ticket_pendiente(self) -> None:
+        """Carga un ticket pendiente del cliente seleccionado."""
+        nombre_cliente = self.entrada.cget('text').strip()
+        
+        # Extraer solo el nombre si viene con formato "Nombre - X tickets - Total"
+        if ' - ' in nombre_cliente:
+            nombre_cliente = nombre_cliente.split(' - ')[0]
+        
+        if not nombre_cliente:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea('Debe seleccionar un cliente', 54)
+            )
+            return
+        
+        if self.callback_cargar_ticket_pendiente:
+            self.callback_cargar_ticket_pendiente(nombre_cliente)
+
+    def _unir_tickets_cliente(self) -> None:
+        """Une todos los tickets de un cliente."""
+        nombre_cliente = self.entrada.cget('text').strip()
+        
+        # Extraer solo el nombre si viene con formato
+        if ' - ' in nombre_cliente:
+            nombre_cliente = nombre_cliente.split(' - ')[0]
+        
+        if not nombre_cliente:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea('Debe seleccionar un cliente', 54)
+            )
+            return
+        
+        if self.callback_unir_tickets:
+            exito, mensaje = self.callback_unir_tickets(nombre_cliente)
+            self.info.actualizar_texto(convertir_texto_multilnea(mensaje, 54))
+            
+            if exito:
+                # Recargar lista
+                self._cargar_clientes_filtrado('pendientes')
     
     def _guardar_pendiente(self) -> None:
         """Guarda el ticket como pendiente."""
@@ -783,7 +824,7 @@ class KeyboardView(BasePanel):
         y = 25
         dis = 180
         
-        # Botones
+        # CORRECCIÓN: Botón Tickets (primero, a la izquierda)
         boton_tickets = MarcoConImagen(
             self.panel_camarero,
             'Tickets',
@@ -796,6 +837,7 @@ class KeyboardView(BasePanel):
         boton_tickets.bind("<Button-1>", self._on_click_camarero)
         boton_tickets.bind("<ButtonRelease-1>", self._on_release_camarero)
         
+        # Botón Eliminar (segundo)
         boton_eliminar = MarcoConImagen(
             self.panel_camarero,
             'Eliminar',
@@ -808,6 +850,7 @@ class KeyboardView(BasePanel):
         boton_eliminar.bind("<Button-1>", self._on_click_camarero)
         boton_eliminar.bind("<ButtonRelease-1>", self._on_release_camarero)
         
+        # Botón Agregar (tercero)
         boton_agregar = MarcoConImagen(
             self.panel_camarero,
             'Agregar',
@@ -828,17 +871,78 @@ class KeyboardView(BasePanel):
         """Maneja la liberación de clics en modo Camarero."""
         accion = event.widget.accion
         
-        if accion == 'tickets':
-            # Ver tickets del camarero
-            pass
-        elif accion == 'eliminar':
+        if accion == 'eliminar':
             # Eliminar camarero
-            pass
+            self._eliminar_camarero()
         elif accion == 'agregar':
             # Agregar camarero
-            pass
+            self._agregar_camarero()
         
         event.widget.invertir_colores()
+
+    def _eliminar_camarero(self) -> None:
+        """Elimina un camarero."""
+        nombre_camarero = self.entrada.cget('text').strip()
+        
+        if not nombre_camarero:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea('Debe seleccionar un camarero', 54)
+            )
+            return
+        
+        # CORRECCIÓN: Usar el callback apropiado
+        if self.callback_eliminar_camarero:
+            exito, mensaje = self.callback_eliminar_camarero(nombre_camarero)
+            self.info.actualizar_texto(convertir_texto_multilnea(mensaje, 54))
+            
+            if exito:
+                self.entrada.cambiar_texto('')
+                self.gestor_entrada.limpiar()
+                # Recargar lista de camareros
+                self._cargar_camareros_en_lista()
+
+
+    def _agregar_camarero(self) -> None:
+        """Agrega un nuevo camarero."""
+        nombre_camarero = self.entrada.cget('text').strip()
+        
+        if not nombre_camarero:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea('Debe ingresar un nombre', 54)
+            )
+            return
+        
+        # CORRECCIÓN: Usar el callback apropiado
+        if self.callback_agregar_camarero:
+            exito, mensaje = self.callback_agregar_camarero(nombre_camarero)
+            self.info.actualizar_texto(convertir_texto_multilnea(mensaje, 54))
+            
+            if exito:
+                self.entrada.cambiar_texto('')
+                self.gestor_entrada.limpiar()
+                # Recargar lista de camareros
+                self._cargar_camareros_en_lista()
+
+
+    def _cargar_camareros_en_lista(self) -> None:
+        """Carga la lista de camareros en el listado."""
+        if self.callback_obtener_camareros:
+            camareros = self.callback_obtener_camareros()
+            self.listado.limpiar()
+            
+            if camareros:
+                for camarero in camareros:
+                    self.listado.agregar_item(camarero)
+                
+                self.info.actualizar_texto(
+                    convertir_texto_multilnea(
+                        f'{len(camareros)} camareros en el sistema', 54
+                    )
+                )
+            else:
+                self.info.actualizar_texto(
+                    convertir_texto_multilnea('No hay camareros registrados', 54)
+                )
     
     # ========================================================================
     # MODO PASSWORD
@@ -1230,7 +1334,7 @@ class KeyboardView(BasePanel):
                         self.modo_escritura = ModeConfig.ESCRITURA_PRODUCTOS
                         self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_PRODUCTOS)
                         
-                        # CORRECCIÓN: Ajustar teclado - tiene texto -> minúsculas
+                        # Ajustar teclado - tiene texto -> minúsculas
                         if self.gestor_entrada.mayusculas:
                             self.teclado.cambiar_mayusculas()
                             self.gestor_entrada.mayusculas = False
@@ -1253,18 +1357,19 @@ class KeyboardView(BasePanel):
                 self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
                 self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_NOMBRES)
                 
-                # CORRECCIÓN: Tiene texto -> minúsculas
+                # Tiene texto -> minúsculas
                 if self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = False
             
             elif self.modo_actual == ModeConfig.MODO_CAMARERO:
+                # CORRECCIÓN: Cargar nombre del camarero seleccionado
                 self.entrada.cambiar_texto(seleccion)
                 self.gestor_entrada.establecer_texto(seleccion)
                 self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
                 self.gestor_entrada.establecer_modo(ModeConfig.ESCRITURA_NOMBRES)
                 
-                # CORRECCIÓN: Tiene texto -> minúsculas
+                # Tiene texto -> minúsculas
                 if self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = False
@@ -1337,7 +1442,11 @@ class KeyboardView(BasePanel):
             self.panel_modos.traer_al_frente()
             self.modo_escritura = ModeConfig.ESCRITURA_NOMBRES
             
-            # CORRECCIÓN: Texto vacío -> Teclado en mayúsculas
+            # CORRECCIÓN: Cargar camareros en la lista al entrar en este modo
+            self._cargar_camareros_en_lista()
+            
+            
+            # Texto vacío -> Teclado en mayúsculas
             if not self.gestor_entrada.mayusculas:
                 self.teclado.cambiar_mayusculas()
                 self.gestor_entrada.mayusculas = True
@@ -1431,6 +1540,37 @@ class KeyboardView(BasePanel):
         """Vincula el callback para verificar password."""
         self.callback_verificar_password = callback
 
+    def vincular_callback_eliminar_camarero(self, callback: Callable) -> None:
+        """Vincula el callback para eliminar camarero."""
+        self.callback_eliminar_camarero = callback
+
+
+    def vincular_callback_agregar_camarero(self, callback: Callable) -> None:
+        """Vincula el callback para agregar camarero."""
+        self.callback_agregar_camarero = callback
+
+
+    def vincular_callback_obtener_camareros(self, callback: Callable) -> None:
+        """Vincula el callback para obtener lista de camareros."""
+        self.callback_obtener_camareros = callback
+
+    def vincular_callback_ver_tickets_camarero(self, callback: Callable) -> None:
+        """Vincula el callback para ver tickets de un camarero."""
+        self.callback_ver_tickets_camarero = callback
+
+    def vincular_callback_cargar_clientes_filtrado(self, callback: Callable) -> None:
+        """Vincula el callback para cargar clientes filtrados."""
+        self.callback_cargar_clientes_filtrado = callback
+
+
+    def vincular_callback_cargar_ticket_pendiente(self, callback: Callable) -> None:
+        """Vincula el callback para cargar ticket pendiente."""
+        self.callback_cargar_ticket_pendiente = callback
+
+
+    def vincular_callback_unir_tickets(self, callback: Callable) -> None:
+        """Vincula el callback para unir tickets."""
+        self.callback_unir_tickets = callback        
 
 # ============================================================================
 # EXPORTACIÓN

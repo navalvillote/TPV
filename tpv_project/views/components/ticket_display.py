@@ -191,12 +191,14 @@ class PantallaNumerico(Label):
     
     def obtener_texto(self) -> str:
         """
-        Obtiene el texto actual.
+        Obtiene el texto actual SIN el símbolo €.
         
         Returns:
-            str: Texto actual
+            str: Texto actual limpio (sin € ni espacios)
         """
-        return self.texto if self.texto != " " else ""
+        # CORRECCIÓN: Limpiar el símbolo € y espacios
+        texto_limpio = self.texto.replace('€', '').strip()
+        return texto_limpio if texto_limpio != "" else ""
     
     def colocar(self, x: int, y: int) -> None:
         """
