@@ -21,7 +21,7 @@ from views.keyboard_view import KeyboardView
 from controllers.receipt_controller import ReceiptController
 from controllers.printer_controller import PrinterController
 from controllers.calendar_controller import CalendarController
-from data.data_manager import DataManager
+from data.data_manager_sqlite import DataManagerSQLite as DataManager
 from models.product import Product
 from utils.formatters import formatear_numero_moneda, convertir_texto_multilnea
 
@@ -479,6 +479,12 @@ class MainWindow(Tk):
         self.keyboard_view.vincular_callback_cargar_ticket_pendiente(self._cargar_ticket_pendiente_callback)
         self.keyboard_view.vincular_callback_unir_tickets(self._unir_tickets_callback)
 
+        # Vincular callbacks para gestión de tickets pendientes
+        self.keyboard_view.vincular_callback_verificar_ticket_tiene_productos(self._verificar_ticket_tiene_productos_callback)
+        self.keyboard_view.vincular_callback_obtener_tickets_cliente(self._obtener_tickets_cliente_callback)
+        self.keyboard_view.vincular_callback_cargar_ticket_por_fecha(self._cargar_ticket_por_fecha_callback)
+
+
         self.keyboard_view.enviar_al_fondo()
 
     # ========================================================================
@@ -704,7 +710,6 @@ class MainWindow(Tk):
         print(f"DEBUG: Total marcos camareros creados: {len(self.marcos_camareros)}")
 
 
-    
     def actualizar_impagos(self) -> None:
         """Actualiza el panel de tickets impagados."""
         # Limpiar existentes
@@ -715,23 +720,41 @@ class MainWindow(Tk):
         x = 5
         y = 5
         
-        # Botón nuevo ticket (solo si no estamos en modo unir)
-        if self.marcos_pie[4].texto == 'TICKETS\nPENDIENTES\nDE PAGO':
-            boton_nuevo = MarcoConImagen(
-                self.panel_impagos,
-                'CREAR NUEVO\nTICKET',
-                'tecla_marco',
-                12,
-                self.panel_impagos.fondo
-            )
-            boton_nuevo.colocar(x, y)
-            boton_nuevo.invertir_colores()
-            boton_nuevo.es_nuevo = True
-            boton_nuevo.bind("<Button-1>", self._on_impago_press)
-            boton_nuevo.bind("<ButtonRelease-1>", self._on_impago_release)
-            self.marcos_impagos.append(boton_nuevo)
-            
-            x += 157
+        # CORRECCIÓN: Primer botón - GESTIONAR IMPAGOS
+        boton_gestionar = MarcoConImagen(
+            self.panel_impagos,
+            'GESTIONAR\nIMPAGOS',
+            'tecla_marco',
+            12,
+            self.panel_impagos.fondo
+        )
+        boton_gestionar.colocar(x, y)
+        boton_gestionar.invertir_colores()
+        boton_gestionar.es_gestion = True
+        boton_gestionar.es_nuevo = False
+        boton_gestionar.bind("<Button-1>", self._on_impago_press)
+        boton_gestionar.bind("<ButtonRelease-1>", self._on_impago_release)
+        self.marcos_impagos.append(boton_gestionar)
+        
+        x += 157
+        
+        # CORRECCIÓN: Segundo botón - CREAR NUEVO TICKET
+        boton_nuevo = MarcoConImagen(
+            self.panel_impagos,
+            'CREAR NUEVO\nTICKET',
+            'tecla_marco',
+            12,
+            self.panel_impagos.fondo
+        )
+        boton_nuevo.colocar(x, y)
+        boton_nuevo.invertir_colores()
+        boton_nuevo.es_nuevo = True
+        boton_nuevo.es_gestion = False
+        boton_nuevo.bind("<Button-1>", self._on_impago_press)
+        boton_nuevo.bind("<ButtonRelease-1>", self._on_impago_release)
+        self.marcos_impagos.append(boton_nuevo)
+        
+        x += 157
         
         # Tickets impagados
         recibos_pendientes = self.data_manager.receipts_pending
@@ -753,6 +776,7 @@ class MainWindow(Tk):
             marco.fecha_recibo = recibo.fecha
             marco.nombre_cliente = recibo.nombre
             marco.es_nuevo = False
+            marco.es_gestion = False
             
             marco.bind("<Button-1>", self._on_impago_press)
             marco.bind("<ButtonRelease-1>", self._on_impago_release)
@@ -877,23 +901,56 @@ class MainWindow(Tk):
     def _pagar_efectivo(self) -> None:
         """Procesa el pago en efectivo."""
         if self.receipt_controller.recibo_tiene_productos():
+            # Obtener el recibo actual
+            recibo_actual = self.receipt_controller.obtener_recibo_actual()
+            
+            # CORRECCIÓN: Si el recibo es un ticket pendiente, eliminarlo de pendientes
+            if recibo_actual.estado == TicketConfig.ESTADO_PENDIENTE:
+                self.data_manager.eliminar_recibo_pendiente(recibo_actual.fecha)
+            
             # Abrir caja
             if self.data_manager.printers[0]:
                 self.printer_controller.abrir_caja_registradora(
                     self.data_manager.printers[0]
                 )
             
-            # Finalizar
+            # Finalizar como pagado
             self.receipt_controller.finalizar_recibo_efectivo(self.camarero_actual)
+            
+            # Guardar cambios
+            self.data_manager.guardar_datos_generales()
+            
+            # Actualizar visualización
             self._actualizar_ticket()
             self.pantalla_numerica.limpiar()
+            
+            # Actualizar panel de impagos si está visible
+            if self.panel_impagos.winfo_ismapped():
+                self.actualizar_impagos()
     
     def _pagar_tarjeta(self) -> None:
         """Procesa el pago con tarjeta."""
         if self.receipt_controller.recibo_tiene_productos():
+            # Obtener el recibo actual
+            recibo_actual = self.receipt_controller.obtener_recibo_actual()
+            
+            # CORRECCIÓN: Si el recibo es un ticket pendiente, eliminarlo de pendientes
+            if recibo_actual.estado == TicketConfig.ESTADO_PENDIENTE:
+                self.data_manager.eliminar_recibo_pendiente(recibo_actual.fecha)
+            
+            # Finalizar como pagado
             self.receipt_controller.finalizar_recibo_tarjeta(self.camarero_actual)
+            
+            # Guardar cambios
+            self.data_manager.guardar_datos_generales()
+            
+            # Actualizar visualización
             self._actualizar_ticket()
             self.pantalla_numerica.limpiar()
+            
+            # Actualizar panel de impagos si está visible
+            if self.panel_impagos.winfo_ismapped():
+                self.actualizar_impagos()
     
     def _abrir_modo_guardar(self) -> None:
         """Abre el modo guardar ticket pendiente o gestión de tickets."""
@@ -1085,17 +1142,7 @@ class MainWindow(Tk):
     
     def _mostrar_impagos(self) -> None:
         """Muestra el panel de tickets impagados."""
-        texto_actual = self.marcos_pie[4].texto
-        
-        if 'UNIR TICKETS' in texto_actual:
-            # Modo unir
-            self.marcos_pie[4].cambiar_texto('TICKETS\nPENDIENTES\nDE PAGO')
-            self.panel_impagos.cambiar_fondo(ColorScheme.PENDIENTE)
-        else:
-            # Modo normal
-            self.marcos_pie[4].cambiar_texto('UNIR TICKETS\nDEL MISMO\nCLIENTE')
-            self.panel_impagos.cambiar_fondo(ColorScheme.PENDIENTE_DARK)
-        
+         
         self.actualizar_impagos()
         self.panel_impagos.traer_al_frente()
     
@@ -1111,35 +1158,29 @@ class MainWindow(Tk):
         """Maneja la liberación del clic en impagado."""
         event.widget.invertir_colores()
         
-        if hasattr(event.widget, 'es_nuevo') and event.widget.es_nuevo:
+        # CORRECCIÓN: Verificar si es botón de gestión
+        if hasattr(event.widget, 'es_gestion') and event.widget.es_gestion:
+            # Abrir gestión de impagos
+            self._abrir_gestion_tickets_pendientes()
+        
+        # CORRECCIÓN: Verificar si es botón de crear nuevo ticket
+        elif hasattr(event.widget, 'es_nuevo') and event.widget.es_nuevo:
             # Crear nuevo ticket
             self.pantalla_numerica.limpiar()
             self.receipt_controller.crear_nuevo_recibo(self.camarero_actual)
             self._actualizar_ticket()
-            self.marcos_pie[4].cambiar_texto('GESTIÓN DE\nTICKETS')
-            self.marcos_pie[1].cambiar_texto('MOSTRANDO\nBEBIDAS')
+            
+            # Volver al panel principal
             self.panel_productos_bebidas.traer_al_frente()
+        
         else:
             # Cargar ticket existente
-            if 'UNIR TICKETS' in self.marcos_pie[4].texto:
-                # Modo unir tickets del mismo cliente
-                self._unir_tickets_cliente(event.widget.nombre_cliente)
-            else:
-                # Cargar ticket normal
-                self.receipt_controller.cargar_recibo_pendiente(event.widget.fecha_recibo)
-                self._actualizar_ticket()
-                self.panel_productos_bebidas.traer_al_frente()
-    
-    def _unir_tickets_cliente(self, nombre_cliente: str) -> None:
-        """Une todos los tickets de un cliente."""
-        recibo_unido = self.receipt_controller.unir_recibos_pendientes_cliente(
-            nombre_cliente
-        )
-        
-        if recibo_unido:
-            self.actualizar_impagos()
+            self.receipt_controller.cargar_recibo_pendiente(event.widget.fecha_recibo)
             self._actualizar_ticket()
-    
+            
+            # Volver al panel principal con productos
+            self.panel_productos_bebidas.traer_al_frente()
+     
     # ========================================================================
     # EVENTOS DE CAMAREROS
     # ========================================================================
@@ -1798,11 +1839,55 @@ class MainWindow(Tk):
                 colores.append(color)
             
             self.keyboard_view.cargar_lista(items, colores)
-            self.keyboard_view.actualizar_info(f'{len(items)} clientes totales')
+            mensaje = f'{len(items)} cliente{"s" if len(items) != 1 else ""} en total'
+            self.keyboard_view.actualizar_info(mensaje)
         
         elif filtro == 'pendientes':
             # Solo clientes con tickets pendientes
-            self._cargar_clientes_con_tickets()
+            recibos_pendientes = self.data_manager.receipts_pending
+            
+            # Agrupar por cliente y contar tickets
+            clientes_dict = {}
+            for recibo in recibos_pendientes:
+                nombre_cliente = recibo.nombre
+                if nombre_cliente not in clientes_dict:
+                    clientes_dict[nombre_cliente] = {
+                        'count': 0,
+                        'total': 0.0
+                    }
+                clientes_dict[nombre_cliente]['count'] += 1
+                clientes_dict[nombre_cliente]['total'] += recibo.calcular_total()
+            
+            # Crear lista formateada
+            items = []
+            colores = []
+            
+            for nombre_cliente in sorted(clientes_dict.keys()):
+                info = clientes_dict[nombre_cliente]
+                tickets_count = info['count']
+                total = info['total']
+                
+                # Formato: "Nombre Cliente - 3 tickets - 45.50€"
+                item = f"{nombre_cliente} - {tickets_count} ticket{'s' if tickets_count > 1 else ''} - {total:.2f}€"
+                items.append(item)
+                
+                # Color según número de tickets
+                if tickets_count > 3:
+                    colores.append('red')  # Muchos tickets
+                elif tickets_count > 1:
+                    colores.append('orange')  # Varios tickets
+                else:
+                    colores.append('black')  # Un ticket
+            
+            # Cargar en el listado
+            if items:
+                self.keyboard_view.cargar_lista(items, colores)
+                mensaje = f'{len(items)} cliente{"s" if len(items) != 1 else ""} con tickets pendientes'
+            else:
+                self.keyboard_view.cargar_lista(['No hay tickets pendientes'], None)
+                mensaje = 'No hay tickets pendientes de pago'
+            
+            self.keyboard_view.actualizar_info(mensaje)
         
         elif filtro == 'pagados':
             # Clientes sin tickets pendientes
@@ -1814,8 +1899,14 @@ class MainWindow(Tk):
             items = [f"{cliente} - Sin deudas" for cliente in sorted(clientes_sin_tickets)]
             colores = ['green'] * len(items)
             
-            self.keyboard_view.cargar_lista(items, colores)
-            self.keyboard_view.actualizar_info(f'{len(items)} clientes sin deudas')
+            if items:
+                self.keyboard_view.cargar_lista(items, colores)
+                mensaje = f'{len(items)} cliente{"s" if len(items) != 1 else ""} sin deudas'
+            else:
+                self.keyboard_view.cargar_lista(['Todos los clientes tienen tickets pendientes'], None)
+                mensaje = 'No hay clientes sin deudas'
+            
+            self.keyboard_view.actualizar_info(mensaje)
 
     def _cargar_ticket_pendiente_callback(self, nombre_cliente: str) -> None:
         """
@@ -1874,7 +1965,7 @@ class MainWindow(Tk):
         if len(recibos_cliente) == 1:
             return False, f'{nombre_cliente} solo tiene 1 ticket, no hay nada que unir'
         
-        # Unir tickets
+        # CORRECCIÓN: Unir tickets (esto ya elimina los sueltos y crea uno fusionado)
         recibo_unido = self.data_manager.unir_recibos_pendientes(nombre_cliente)
         
         if recibo_unido:
@@ -1886,9 +1977,59 @@ class MainWindow(Tk):
                 self.actualizar_impagos()
             
             total = recibo_unido.calcular_total()
-            return True, f'{len(recibos_cliente)} tickets unidos. Total: {total:.2f}€'
+            return True, f'{len(recibos_cliente)} tickets unidos en uno. Total: {total:.2f}€'
         
         return False, 'Error al unir tickets'
+    
+    def _verificar_ticket_tiene_productos_callback(self) -> bool:
+        """
+        Callback para verificar si el ticket actual tiene productos.
+        
+        Returns:
+            bool: True si tiene productos, False si está vacío
+        """
+        return self.receipt_controller.recibo_tiene_productos()
+
+    def _obtener_tickets_cliente_callback(self, nombre_cliente: str) -> List:
+        """
+        Callback para obtener todos los tickets pendientes de un cliente.
+        
+        Args:
+            nombre_cliente: Nombre del cliente
+        
+        Returns:
+            List[Receipt]: Lista de tickets pendientes del cliente
+        """
+        return self.data_manager.obtener_recibos_pendientes_cliente(nombre_cliente)
+
+    def _cargar_ticket_por_fecha_callback(self, fecha: str) -> bool:
+        """
+        Callback para cargar un ticket por su fecha.
+        
+        Args:
+            fecha: Fecha del ticket
+        
+        Returns:
+            bool: True si se cargó correctamente
+        """
+        try:
+            recibo = self.data_manager.obtener_recibo_pendiente(fecha)
+            
+            if recibo:
+                # CORRECCIÓN: Solo establecer como recibo actual
+                # NO eliminar de pendientes hasta que se pague o se una
+                self.receipt_controller.establecer_recibo_actual(recibo)
+                
+                # Actualizar visualización
+                self._actualizar_ticket()
+                
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"Error al cargar ticket: {e}")
+            return False   
         
     # ========================================================================
     # MÉTODOS AUXILIARES

@@ -247,11 +247,14 @@ class DataManager:
         """
         Une todos los recibos pendientes de un cliente en uno solo.
         
+        IMPORTANTE: Este método ELIMINA los recibos sueltos del cliente
+        y crea un nuevo recibo unificado que contiene todas las líneas.
+        
         Args:
             nombre_cliente: Nombre del cliente
             
         Returns:
-            Receipt: Recibo unificado
+            Receipt: Recibo unificado, o None si no hay recibos
         """
         recibos_cliente = self.obtener_recibos_pendientes_cliente(nombre_cliente)
         
@@ -271,7 +274,7 @@ class DataManager:
             for linea in recibo.pedido:
                 recibo_unido.agregar_linea(linea)
         
-        # Eliminar recibos antiguos
+        # CORRECCIÓN: Eliminar recibos antiguos sueltos
         self.receipts_pending = [
             r for r in self.receipts_pending 
             if r.nombre != nombre_cliente

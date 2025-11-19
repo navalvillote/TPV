@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from config.settings import validate_config
 from core.image_manager import get_image_manager
-from data.data_manager import get_data_manager
+from data.data_manager_sqlite import get_data_manager_sqlite as get_data_manager
 from models.receipt import ReceiptManager
 from controllers.receipt_controller import ReceiptController
 from controllers.printer_controller import get_printer_controller

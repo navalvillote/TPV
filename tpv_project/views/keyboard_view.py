@@ -48,6 +48,11 @@ class KeyboardView(BasePanel):
         self.panel_pendiente: Optional[BasePanel] = None
         self.panel_camarero: Optional[BasePanel] = None
         self.panel_password: Optional[BasePanel] = None
+
+        # Variables para gestión de tickets pendientes
+        self.cliente_actual_pendientes = None  # Cliente seleccionado
+        self.tickets_cliente_actual = []  # Lista de tickets del cliente
+        self.indice_ticket_actual = 0  # Índice del ticket actual en la lista        
         
         # Gestor de entrada
         self.gestor_entrada = GestorEntradaTexto()
@@ -695,7 +700,7 @@ class KeyboardView(BasePanel):
             event.widget.invertir_colores()
         
         elif accion == 'cargar':
-            self._cargar_ticket_pendiente()
+            self._cargar_siguiente_ticket_pendiente()
             event.widget.invertir_colores()
         
         elif accion == 'unir':
@@ -743,6 +748,11 @@ class KeyboardView(BasePanel):
             self.info.actualizar_texto(convertir_texto_multilnea(mensaje, 54))
             
             if exito:
+                # Reiniciar estado de carga de tickets
+                self.cliente_actual_pendientes = None
+                self.tickets_cliente_actual = []
+                self.indice_ticket_actual = 0
+                
                 # Recargar lista
                 self._cargar_clientes_filtrado('pendientes')
     
@@ -750,24 +760,103 @@ class KeyboardView(BasePanel):
         """Guarda el ticket como pendiente."""
         nombre_cliente = self.entrada.cget('text').strip()
         
+        # Extraer solo el nombre si viene con formato "Nombre - X tickets - Total"
+        if ' - ' in nombre_cliente:
+            nombre_cliente = nombre_cliente.split(' - ')[0]
+        
+        # CORRECCIÓN: Validar que hay nombre Y que hay productos en el ticket
         if not nombre_cliente:
             self.info.actualizar_texto(
                 convertir_texto_multilnea('Debe ingresar un nombre de cliente', 54)
             )
             return
         
+        # Verificar que hay productos en el ticket principal
+        if self.callback_verificar_ticket_tiene_productos:
+            if not self.callback_verificar_ticket_tiene_productos():
+                self.info.actualizar_texto(
+                    convertir_texto_multilnea('El ticket está vacío. No se puede guardar', 54)
+                )
+                return
+        
         if self.callback_guardar_pendiente:
             exito = self.callback_guardar_pendiente(nombre_cliente)
             
             if exito:
                 self.info.actualizar_texto(
-                    convertir_texto_multilnea('Ticket guardado como pendiente', 54)
+                    convertir_texto_multilnea(f'Ticket guardado para {nombre_cliente}', 54)
                 )
+                # Recargar lista para mostrar el nuevo ticket
+                self._cargar_clientes_filtrado('pendientes')
                 self.entrada.cambiar_texto('')
                 self.gestor_entrada.limpiar()
             else:
                 self.info.actualizar_texto(
                     convertir_texto_multilnea('Error al guardar ticket', 54)
+                )
+
+    def _cargar_siguiente_ticket_pendiente(self) -> None:
+        """Carga el siguiente ticket pendiente del cliente seleccionado."""
+        nombre_cliente = self.entrada.cget('text').strip()
+        
+        # Extraer solo el nombre si viene con formato
+        if ' - ' in nombre_cliente:
+            nombre_cliente = nombre_cliente.split(' - ')[0]
+        
+        if not nombre_cliente:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea('Debe seleccionar un cliente', 54)
+            )
+            return
+        
+        # Si cambiamos de cliente, reiniciar índice
+        if self.cliente_actual_pendientes != nombre_cliente:
+            self.cliente_actual_pendientes = nombre_cliente
+            self.indice_ticket_actual = 0
+            
+            # CORRECCIÓN: Obtener tickets del cliente (actualizados desde la DB)
+            if self.callback_obtener_tickets_cliente:
+                self.tickets_cliente_actual = self.callback_obtener_tickets_cliente(nombre_cliente)
+            else:
+                self.tickets_cliente_actual = []
+        else:
+            # CORRECCIÓN: Actualizar lista de tickets por si se unieron o pagaron
+            if self.callback_obtener_tickets_cliente:
+                tickets_actualizados = self.callback_obtener_tickets_cliente(nombre_cliente)
+                
+                # Si cambió el número de tickets, reiniciar índice
+                if len(tickets_actualizados) != len(self.tickets_cliente_actual):
+                    self.tickets_cliente_actual = tickets_actualizados
+                    self.indice_ticket_actual = 0
+                else:
+                    self.tickets_cliente_actual = tickets_actualizados
+        
+        # Verificar que el cliente tiene tickets
+        if not self.tickets_cliente_actual:
+            self.info.actualizar_texto(
+                convertir_texto_multilnea(f'{nombre_cliente} no tiene tickets pendientes', 54)
+            )
+            return
+        
+        # Obtener ticket actual (con índice circular)
+        indice_real = self.indice_ticket_actual % len(self.tickets_cliente_actual)
+        ticket_actual = self.tickets_cliente_actual[indice_real]
+        
+        # Cargar ticket en el menú principal (SIN eliminarlo de pendientes)
+        if self.callback_cargar_ticket_por_fecha:
+            exito = self.callback_cargar_ticket_por_fecha(ticket_actual.fecha)
+            
+            if exito:
+                # Incrementar índice para el siguiente
+                self.indice_ticket_actual = (indice_real + 1) % len(self.tickets_cliente_actual)
+                
+                # Mostrar mensaje informativo (el número actual del ticket)
+                numero_ticket_mostrado = indice_real + 1
+                mensaje = f'{nombre_cliente}, ticket pendiente nº {numero_ticket_mostrado}'
+                self.info.actualizar_texto(convertir_texto_multilnea(mensaje, 54))
+            else:
+                self.info.actualizar_texto(
+                    convertir_texto_multilnea('Error al cargar ticket', 54)
                 )
     
     def _eliminar_cliente(self) -> None:
@@ -1201,14 +1290,21 @@ class KeyboardView(BasePanel):
         # CORRECCIÓN: Si se borró todo con Delete, volver a mayúsculas
         if tecla == 'Delete':
             if len(texto_actual) == 0:
+                # Texto vacío -> mayúsculas
                 if not self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = True
-            # Si se borró hasta un espacio al final, siguiente letra en mayúsculas
             elif texto_actual.endswith(' '):
+                # Si termina en espacio -> siguiente letra en mayúsculas
                 if not self.gestor_entrada.mayusculas:
                     self.teclado.cambiar_mayusculas()
                     self.gestor_entrada.mayusculas = True
+            else:
+                # CORRECCIÓN: Si NO termina en espacio (termina en letra) -> minúsculas
+                # Esto cubre el caso de borrar un espacio y quedar con un carácter
+                if self.gestor_entrada.mayusculas:
+                    self.teclado.cambiar_mayusculas()
+                    self.gestor_entrada.mayusculas = False
             return
         
         # Solo aplicar a letras y espacios
@@ -1544,11 +1640,9 @@ class KeyboardView(BasePanel):
         """Vincula el callback para eliminar camarero."""
         self.callback_eliminar_camarero = callback
 
-
     def vincular_callback_agregar_camarero(self, callback: Callable) -> None:
         """Vincula el callback para agregar camarero."""
         self.callback_agregar_camarero = callback
-
 
     def vincular_callback_obtener_camareros(self, callback: Callable) -> None:
         """Vincula el callback para obtener lista de camareros."""
@@ -1562,15 +1656,25 @@ class KeyboardView(BasePanel):
         """Vincula el callback para cargar clientes filtrados."""
         self.callback_cargar_clientes_filtrado = callback
 
-
     def vincular_callback_cargar_ticket_pendiente(self, callback: Callable) -> None:
         """Vincula el callback para cargar ticket pendiente."""
         self.callback_cargar_ticket_pendiente = callback
 
-
     def vincular_callback_unir_tickets(self, callback: Callable) -> None:
         """Vincula el callback para unir tickets."""
-        self.callback_unir_tickets = callback        
+        self.callback_unir_tickets = callback 
+
+    def vincular_callback_verificar_ticket_tiene_productos(self, callback: Callable) -> None:
+        """Vincula el callback para verificar si hay productos en el ticket."""
+        self.callback_verificar_ticket_tiene_productos = callback
+
+    def vincular_callback_obtener_tickets_cliente(self, callback: Callable) -> None:
+        """Vincula el callback para obtener tickets de un cliente."""
+        self.callback_obtener_tickets_cliente = callback
+
+    def vincular_callback_cargar_ticket_por_fecha(self, callback: Callable) -> None:
+        """Vincula el callback para cargar un ticket por su fecha."""
+        self.callback_cargar_ticket_por_fecha = callback       
 
 # ============================================================================
 # EXPORTACIÓN
